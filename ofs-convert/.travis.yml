@@ -1,0 +1,19 @@
+language: cpp
+sudo: required
+
+env:
+  matrix:
+    - CMAKE_CONFIGURATION=release
+    - CMAKE_CONFIGURATION=debug
+
+services:
+  - docker
+
+before_install:
+  - sudo apt-get -qq update
+  - sudo apt-get -y install realpath
+
+script:
+  - cd test/container
+  - ./build.sh
+  - OFS_CONVERT_TOOL_TIMEOUT=60 ./run.sh
