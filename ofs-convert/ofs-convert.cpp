@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-int main(int argc, const char** argv) {
+int c_main(int argc, const char** argv) {
     if (argc < 2) {
         printf("Wrong usage\n");
         exit(1);
@@ -45,4 +45,5 @@ int main(int argc, const char** argv) {
 
     closePartition(&partition);
     visualizer_render_to_file("partition.svg", partition.fileStat.st_size / meta_info.cluster_size);
+    return 0;
 }

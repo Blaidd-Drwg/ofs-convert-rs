@@ -6,7 +6,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 find_package(UUID REQUIRED)
 
-add_executable(ofs-convert
+add_library(ofs-convert STATIC
         ext4.cpp
         ext4.h
         ext4_bg.cpp
