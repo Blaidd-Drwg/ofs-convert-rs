@@ -1,0 +1,4 @@
+**/target
+examples
+ofs-convert/test/tests
+.git
