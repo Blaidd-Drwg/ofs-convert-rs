@@ -34,6 +34,10 @@ impl Partition {
         self.mmap.len()
     }
 
+    pub fn as_ptr(&self) -> *const u8 {
+        self.mmap.as_ptr()
+    }
+
     pub fn as_mut_ptr(&mut self) -> *mut u8 {
         self.mmap.as_mut_ptr()
     }

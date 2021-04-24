@@ -1,4 +1,7 @@
 mod partition;
+mod fat;
+mod ext4;
+mod lohi;
 
 use partition::Partition;
 
@@ -43,8 +46,11 @@ fn print_help() {
 
 fn ofs_convert(partition_path: &str) -> io::Result<()> {
     let mut partition = Partition::open(partition_path)?;
-    unsafe {
-        c_main(CPartition{size: partition.size(), ptr: partition.as_mut_ptr()});
-    }
+    let fat_partition = fat::FatPartition::new(partition.as_mut_ptr());
+    let superblock = ext4::SuperBlock::new(fat_partition.boot_sector());
+    // determine ext4 structure (via boot sector)
+    // traverse, save metadata, move conflicting data
+    // write block group headers (breaks FAT)
+    // convert file metadata (makes ext4)
     Ok(())
 }
