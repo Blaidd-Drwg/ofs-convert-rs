@@ -26,7 +26,6 @@ add_library(ofs-convert STATIC
         metadata_reader.cpp
         metadata_reader.h
         ofs-convert.cpp
-        partition.cpp
         partition.h
         stream-archiver.cpp
         stream-archiver.h

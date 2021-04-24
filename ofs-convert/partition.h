@@ -3,15 +3,11 @@
 
 #include <stdint.h>
 #include <sys/stat.h>
+#include <stddef.h>
 
 struct Partition {
-    const char* path;
-    int mmapFlags, file;
-    struct stat fileStat;
+    size_t size;
     uint8_t* ptr;
 };
-
-void closePartition(Partition* partition);
-bool openPartition(Partition* partition);
 
 #endif //OFS_CONVERT_PARTITION_H

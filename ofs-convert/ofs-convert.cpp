@@ -10,17 +10,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-int c_main(int argc, const char** argv) {
-    if (argc < 2) {
-        printf("Wrong usage\n");
-        exit(1);
-    }
-    Partition partition = {.path = argv[1]};
-    if (!openPartition(&partition)) {
-        fprintf(stderr, "Failed to open partition");
-        return 1;
-    }
-
+int c_main(Partition partition) {
     read_boot_sector(partition.ptr);
     set_meta_info(partition.ptr);
 
@@ -43,7 +33,6 @@ int c_main(int argc, const char** argv) {
     build_lost_found();
     finalize_block_groups_on_disk();
 
-    closePartition(&partition);
-    visualizer_render_to_file("partition.svg", partition.fileStat.st_size / meta_info.cluster_size);
+    visualizer_render_to_file("partition.svg", partition.size / meta_info.cluster_size);
     return 0;
 }
