@@ -10,11 +10,12 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-int c_main(Partition partition) {
-    read_boot_sector(partition.ptr);
+int c_main(Partition partition, ext4_super_block _sb, struct boot_sector _boot_sector) {
+    sb = _sb;
+    boot_sector = _boot_sector;
+
     set_meta_info(partition.ptr);
 
-    init_ext4_sb();
     int bg_count = block_group_count();
     init_extent_allocator(create_block_group_meta_extents(bg_count), bg_count);
 

@@ -11,8 +11,8 @@ use std::io;
 
 
 extern "C" {
-    #[link_name = "\u{1}_Z6c_main9Partition"]
-    pub fn c_main(partition: CPartition) -> c_int;
+    #[link_name = "\u{1}_Z6c_main9Partition16ext4_super_block11boot_sector"]
+    pub fn c_main(partition: CPartition, superblock: ext4::SuperBlock, boot_sector: fat::BootSector) -> c_int;
 }
 
 #[repr(C)]
@@ -47,8 +47,11 @@ fn print_help() {
 fn ofs_convert(partition_path: &str) -> io::Result<()> {
     let mut partition = Partition::open(partition_path)?;
     let fat_partition = fat::FatPartition::new(partition.as_mut_ptr());
-    let superblock = ext4::SuperBlock::new(fat_partition.boot_sector());
-    // determine ext4 structure (via boot sector)
+    let boot_sector = fat_partition.boot_sector();
+    let superblock = ext4::SuperBlock::new(boot_sector)?;
+    unsafe {
+        c_main(CPartition{size: partition.size(), ptr: partition.as_mut_ptr()}, superblock, boot_sector.clone());
+    }
     // traverse, save metadata, move conflicting data
     // write block group headers (breaks FAT)
     // convert file metadata (makes ext4)
