@@ -11,6 +11,7 @@
 
 extern uint64_t pageSize;
 
+// relates to one directory
 struct cluster_read_state {
     extent_iterator iterator;
     uint32_t cluster_dentry;
@@ -20,7 +21,9 @@ struct cluster_read_state {
 cluster_read_state init_read_state(extent_iterator iterator) {
     cluster_read_state state;
     uint32_t cluster_no = next_cluster_no(&iterator);
+    // points to first dentry of the directory
     state.current_cluster = cluster_no ? reinterpret_cast<fat_dentry *>(cluster_start(cluster_no)) : NULL;
+    // a cluster can contain multiple dentries, we are at the first one
     state.cluster_dentry = 0;
     state.iterator = iterator;
     return state;
@@ -147,6 +150,7 @@ fat_dentry* read_lfn(fat_dentry* first_entry, StreamArchiver* extent_stream, uin
 void traverse(StreamArchiver* dir_extent_stream, StreamArchiver* write_stream) {
     uint32_t* children_count = reserve_children_count(write_stream);
     *children_count = 0;
+    // an "iterator" over all dentries in the directory, using the extents we have previously written into the stream
     cluster_read_state state = init_read_state(init(dir_extent_stream));
     fat_dentry* current_dentry = next_dentry(&state);
 

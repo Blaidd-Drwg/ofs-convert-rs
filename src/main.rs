@@ -2,6 +2,7 @@ mod partition;
 mod fat;
 mod ext4;
 mod lohi;
+// mod allocator;
 
 use partition::Partition;
 
@@ -46,11 +47,11 @@ fn print_help() {
 
 fn ofs_convert(partition_path: &str) -> io::Result<()> {
     let mut partition = Partition::open(partition_path)?;
-    let fat_partition = fat::FatPartition::new(partition.as_mut_ptr());
-    let boot_sector = fat_partition.boot_sector();
-    let superblock = ext4::SuperBlock::new(boot_sector)?;
     unsafe {
-        c_main(CPartition{size: partition.size(), ptr: partition.as_mut_ptr()}, superblock, boot_sector.clone());
+        let fat_partition = fat::FatPartition::new(partition.as_mut_slice());
+        let boot_sector = *fat_partition.boot_sector();
+        let superblock = ext4::SuperBlock::new(&boot_sector)?;
+        c_main(CPartition{size: partition.size(), ptr: partition.as_mut_ptr()}, superblock, boot_sector);
     }
     // traverse, save metadata, move conflicting data
     // write block group headers (breaks FAT)

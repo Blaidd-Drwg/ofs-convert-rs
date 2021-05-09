@@ -3,6 +3,7 @@ use std::os::unix::{io::AsRawFd, fs::FileTypeExt};
 use std::io::{self, ErrorKind};
 use std::path::Path;
 use std::process::Command;
+use std::slice;
 
 use memmap::{MmapMut, MmapOptions};
 use fs2::FileExt;
@@ -40,6 +41,12 @@ impl Partition {
 
     pub fn as_mut_ptr(&mut self) -> *mut u8 {
         self.mmap.as_mut_ptr()
+    }
+
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        unsafe {
+            slice::from_raw_parts_mut(self.mmap.as_mut_ptr(), self.mmap.len())
+        }
     }
 
     fn get_file_size(file: &File) -> io::Result<usize> {

@@ -1,9 +1,8 @@
-pub struct FatPartition {
-    ptr: *mut u8,
-}
+use crate::fat::FatDentry;
+use std::convert::TryFrom;
 
 #[repr(C, packed)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct BootSector {
     pub jump_instruction: [u8; 3],
     pub oem_name: [u8; 8],
@@ -12,13 +11,13 @@ pub struct BootSector {
     pub sectors_before_fat: u16,
     pub fat_count: u8,
     pub dir_entries: u16,
-    pub sector_count: u16,
+    pub sector_count_1: u16,
     pub media_descriptor: u8,
     pub unused2: u16,
     pub sectors_per_disk_track: u16,
     pub disk_heads: u16,
     pub hidden_sectors_before_partition: u32,
-    pub total_sectors2: u32,
+    pub sector_count_2: u32,
     pub sectors_per_fat: u32,
     pub drive_description_flags: u16,
     pub version: u16,
@@ -36,10 +35,10 @@ pub struct BootSector {
 
 impl BootSector {
     pub fn sector_count(&self) -> u32 {
-        if self.sector_count != 0 {
-           u32::from(self.sector_count)
+        if self.sector_count_1 != 0 {
+           u32::from(self.sector_count_1)
         } else {
-           self.total_sectors2
+           self.sector_count_2
         }
     }
 
@@ -51,6 +50,10 @@ impl BootSector {
     /// in bytes
     pub fn cluster_size(&self) -> u32 {
         u32::from(self.bytes_per_sector) * u32::from(self.sectors_per_cluster)
+    }
+
+    pub fn dentries_per_cluster(&self) -> usize {
+        usize::try_from(self.cluster_size()).unwrap() / std::mem::size_of::<FatDentry>()
     }
 
     pub fn volume_label(&self) -> &[u8] {
@@ -71,14 +74,3 @@ impl BootSector {
 }
 // impl drop for testign
 
-impl FatPartition {
-    pub fn new(ptr: *mut u8) -> Self {
-        Self { ptr }
-    }
-
-    pub fn boot_sector(&self) -> &BootSector {
-        unsafe {
-            (self.ptr as *const BootSector).as_ref().unwrap()
-        }
-    }
-}

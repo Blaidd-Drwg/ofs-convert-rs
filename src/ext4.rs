@@ -152,10 +152,10 @@ impl SuperBlock {
         // We use the sparse_super2 logic from mke2fs, meaning that the last block
         // group always has a super block copy.
         // if block_count % sb.s_blocks_per_group < block_group_overhead(true) + 50 {
-            // LoHi64 { lo: &mut sb.s_blocks_count_lo, hi: &mut sb.s_blocks_count_hi }.set(0); // TODO
+            // LoHi64 { lo: &mut sb.s_blocks_count_lo, hi: &mut sb.s_blocks_count_hi }.set(block_count);
         // }
 
-        // // Same logic as in mke2fs
+        // Same logic as in mke2fs
         let block_group_count = block_count.div_ceil(&(u64::from(sb.s_blocks_per_group)));
         let block_group_count = u32::try_from(block_group_count).unwrap(); // TODO
 

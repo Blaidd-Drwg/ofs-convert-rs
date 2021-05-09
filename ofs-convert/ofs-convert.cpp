@@ -21,9 +21,11 @@ int c_main(Partition partition, ext4_super_block _sb, struct boot_sector _boot_s
 
     StreamArchiver write_stream;
     init_stream_archiver(&write_stream, meta_info.cluster_size);
+    // a StreamArchiver only keeps a reference to the page list's tail, to read it afterwards we have to copy the head.
     StreamArchiver extent_stream = write_stream;
     StreamArchiver read_stream = write_stream;
 
+    // root has no name, so we handle its extents separately
     aggregate_extents(boot_sector.root_cluster_no, true, &write_stream);
     traverse(&extent_stream, &write_stream);
 
