@@ -2,6 +2,7 @@ mod partition;
 mod fat;
 mod ext4;
 mod lohi;
+mod util;
 // mod allocator;
 
 use partition::Partition;

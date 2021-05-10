@@ -9,23 +9,13 @@ pub union FatPseudoDentry {
 
 impl FatPseudoDentry {
     pub fn as_dentry(&self) -> Option<&FatDentry> {
-        if self.is_long_file_name() {
-            None
-        } else {
-            unsafe {
-                Some(&self.dentry)
-            }
-        }
+        // SAFETY: this is safe, since we only access the union if the check succeeds
+        unsafe { (!self.is_long_file_name()).then(|| &self.dentry) }
     }
 
     pub fn as_long_file_name(&self) -> Option<&LongFileName> {
-        if self.is_long_file_name() {
-            unsafe {
-                Some(&self.long_file_name)
-            }
-        } else {
-            None
-        }
+        // SAFETY: this is safe, since we only access the union if the check succeeds
+        unsafe { self.is_long_file_name().then(|| &self.long_file_name) }
     }
 
     pub fn is_long_file_name(&self) -> bool {
@@ -36,9 +26,10 @@ impl FatPseudoDentry {
         }
     }
 
+    /// True iff self is invalid but the directory might more valid dentries
     pub fn is_invalid(&self) -> bool {
-        // SAFETY: the first byte is used to mark invalid entries both in FatDentry and
-        // LongFileName, so this is safe
+        // SAFETY: the first byte is used to mark invalid entries both for dentries and
+        // LFN entries, so this is safe
         unsafe {
             self.long_file_name.sequence_no == 0xE5
         }
@@ -46,8 +37,10 @@ impl FatPseudoDentry {
 
     /// True iff self is invalid and the directory contains no more valid dentries
     pub fn is_dir_table_end(&self) -> bool {
+        // SAFETY: we misuse `sequence_no` to check the first byte, regardless of
+        // whether it's a dentry or LFN entry
         unsafe {
-            self.dentry.short_name[0] == 0x00
+            self.long_file_name.sequence_no == 0x00
         }
     }
 
@@ -82,14 +75,10 @@ impl FatDentry {
     // TODO refactor to not need mut
     // TODO refactor to need an unsafe function to create
     pub fn first_cluster_idx(&mut self) -> u32 {
-        unsafe { // Ok since both fields are 2-byte-aligned
+        // SAFETY: safe assuming self is aligned, since both fields are 2-byte-aligned within self
+        unsafe {
             LoHi32 { lo: &mut self.first_cluster_low, hi: &mut self.first_cluster_high }.get()
         }
-    }
-
-    /// True iff self is invalid but the directory might more valid dentries
-    pub fn is_invalid(&self) -> bool {
-        self.short_name[0] != 0xE5
     }
 
     /// True iff the dentry represents either the current directory `.` or the parent directory `..`
@@ -97,7 +86,7 @@ impl FatDentry {
         self.short_name[0] == b'.'
     }
 
-    /// True iff TODO
+    /// True iff the file name has an extension
     pub fn has_file_extension(&self) -> bool {
         self.short_extension[0] != b' '
     }
@@ -110,8 +99,7 @@ impl FatDentry {
         self.short_name_case & 0x10 != 0
     }
 
-    // TODO what encoding do FAT short names use?
-    // Assume ascii for now
+    // TODO what encoding do FAT short names use?  Assume ascii for now
     pub fn read_short_file_name(&self) -> String {
         let name_ascii_bytes: Vec<_> = self.short_name.iter().copied().collect();
         let mut name_string = String::from_utf8(name_ascii_bytes).unwrap();
@@ -146,7 +134,8 @@ pub struct LongFileName {
 }
 
 impl LongFileName {
-    /// The position of this LFN entry in the complete name, 1-based. On disk, the last LFN entry appears first.
+    /// The position of this LFN entry in the complete name, 1-based. On disk, LFN entries appear
+    /// in reverse order, so the first entry's `sequence_no` equals the number of entries.
     pub fn sequence_no(&self) -> u8 {
         // in a valid LFN entry, bits 0-4 represent the sequence number
         self.sequence_no & 0b00011111

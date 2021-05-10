@@ -44,6 +44,8 @@ impl Partition {
     }
 
     pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        // SAFETY: no aliasing because we borrow self as mut; valid length because we get
+        // it from `self.mmap`; trivially aligned because it's u8
         unsafe {
             slice::from_raw_parts_mut(self.mmap.as_mut_ptr(), self.mmap.len())
         }

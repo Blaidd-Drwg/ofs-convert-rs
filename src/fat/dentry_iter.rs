@@ -1,4 +1,5 @@
 use crate::fat::{FatPartition, FatPseudoDentry, ClusterIdx, FatFile};
+use crate::util::ExactAlign;
 use std::iter::Peekable;
 use itertools::free::join;
 
@@ -52,6 +53,8 @@ impl<'a, I> FatFileIter<'a, I> where I: Iterator<Item = &'a FatPseudoDentry> {
     }
 }
 
+/// An iterator over all valid pseudo-dentries from a given cluster iterator (excluding the '.' and
+/// '..' directories).
 pub struct FatPseudoDentryIter<'a, I> where I: Iterator<Item = ClusterIdx> {
     cluster_idx_iter: I,
     current_cluster: Option<&'a [FatPseudoDentry]>,
@@ -78,21 +81,18 @@ impl<'a, I> Iterator for FatPseudoDentryIter<'a, I> where I: Iterator<Item = Clu
 
 
 impl<'a, I> FatPseudoDentryIter<'a, I> where I: Iterator<Item = ClusterIdx> {
-    pub fn new(cluster_idx_iter: I, partition: &'a FatPartition<'a>, dentries_per_cluster: usize) -> Self {
-        let mut cluster_idx_iter = cluster_idx_iter;
-        let cluster_idx = cluster_idx_iter.next();
-        let current_cluster = cluster_idx.and_then(|cluster_idx| unsafe {
-            let cluster = partition.cluster(cluster_idx);
-            let (_, dentries, _) = cluster.align_to::<FatPseudoDentry>();
-            Some(dentries)
-        });
-        Self {
+    /// SAFETY: Safe if `cluster_idx_iter` iterates only over clusters belonging to a directory and if
+    /// `dentries_per_cluster` is correct.
+    pub unsafe fn new(cluster_idx_iter: I, partition: &'a FatPartition<'a>, dentries_per_cluster: usize) -> Self {
+        let mut instance = Self {
             cluster_idx_iter,
-            current_cluster,
+            current_cluster: None,
             current_dentry_idx: 0,
             partition,
             dentries_per_cluster,
-        }
+        };
+        instance.get_next_cluster();
+        instance
     }
 
     /// Possibly invalid or dot dir
@@ -102,16 +102,22 @@ impl<'a, I> FatPseudoDentryIter<'a, I> where I: Iterator<Item = ClusterIdx> {
         }
 
         if self.current_dentry_idx >= self.dentries_per_cluster {
-            let cluster_idx = self.cluster_idx_iter.next()?;
-            let new_cluster = self.partition.cluster(cluster_idx);
-            unsafe {
-                let (_, dentries, _) = new_cluster.align_to::<FatPseudoDentry>();
-                self.current_cluster = Some(dentries);
-            }
+            self.get_next_cluster();
             self.current_dentry_idx = 0;
         }
-        let dentry = &self.current_cluster.unwrap()[self.current_dentry_idx];
+
+        let dentry = &self.current_cluster?[self.current_dentry_idx];
         self.current_dentry_idx += 1;
         Some(dentry)
+    }
+
+    fn get_next_cluster(&mut self) {
+        self.current_cluster = self.cluster_idx_iter.next().map(|cluster_idx| {
+            let cluster = self.partition.cluster(cluster_idx);
+            // SAFETY: safe, since directory data is a sequence of pseudo-dentries
+            let dentries = unsafe { cluster.exact_align_to::<FatPseudoDentry>() };
+            assert_eq!(dentries.len(), self.dentries_per_cluster);
+            dentries
+        });
     }
 }

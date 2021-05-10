@@ -130,6 +130,7 @@ impl SuperBlock {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "This tool only works for FAT partitions with cluster size >= 1kB"));
         }
 
+        // SAFETY: safe as long as we set all fields needed for a consistent file system by hand
         let mut sb: SuperBlock = unsafe { std::mem::zeroed() };
 
         let log_block_size = f64::from(bytes_per_block).log2().round() as u32;

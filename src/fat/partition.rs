@@ -1,4 +1,5 @@
 use crate::fat::{BootSector, Cluster, ClusterIdx, FatFileIter, FatEntryIter, FatFile, FatPseudoDentryIter, FatPseudoDentry, FatTable};
+use crate::util::ExactAlign;
 use std::convert::TryFrom;
 use std::mem::size_of;
 use std::ops::Range;
@@ -14,13 +15,12 @@ pub struct FatPartition<'a> {
 }
 
 
+// TODO ensure even an inconsistent FAT partition won't ever cause undefined behavior, remove unsafe where possible
 impl<'a> FatPartition<'a> {
-    // TODO refactor
-    /// SAFETY: partition_data must be a consistent FAT32 partition
+    /// SAFETY: Safety is only guaranteed if `partition_data` is a consistent FAT32 partition.
     pub unsafe fn new(partition_data: &'a mut [u8]) -> Self {
         let (bs_bytes, data_after_boot_sector) = partition_data.split_at_mut(size_of::<BootSector>());
-        let (_, bs_slice, _) = bs_bytes.align_to::<BootSector>();
-        let boot_sector = bs_slice.get(0).expect("Failed to read boot sector.");
+        let boot_sector = &*(bs_bytes as *const [u8] as *const BootSector);
 
         let fat_table_range = Self::get_fat_table_range(boot_sector);
         let data_range = Self::get_data_range(boot_sector);
@@ -28,7 +28,7 @@ impl<'a> FatPartition<'a> {
         let relative_fat_table_start = fat_table_range.start - bs_bytes.len();
         let data_after_reserved_sectors = &mut data_after_boot_sector[relative_fat_table_start..];
         let (fat_table_bytes, data_after_fat_table) = data_after_reserved_sectors.split_at_mut(fat_table_range.len());
-        let (_, fat_table_data, _) = fat_table_bytes.align_to::<ClusterIdx>();
+        let fat_table_data = fat_table_bytes.exact_align_to::<ClusterIdx>();
         let fat_table = FatTable::new(fat_table_data);
 
         let relative_data_start = data_range.start - fat_table_range.end;
@@ -58,7 +58,6 @@ impl<'a> FatPartition<'a> {
         self.boot_sector
     }
 
-    // TODO in general rethink unsafety
     // TODO assert that alignments are exact. new function convert_slice?
     // TODO all the int type conversions (from, try_from)
     // TODO error concept: return options of results?
@@ -87,7 +86,8 @@ impl<'a> FatPartition<'a> {
     }
 
     /// Given the index of a directory's first cluster, iterate over the directory's content.
-    pub fn dir_content_iter(&'a self, first_cluster_idx: ClusterIdx) -> impl Iterator<Item = FatFile> + 'a {
+    /// SAFETY: safe if `first_cluster_idx` points to a cluster belonging to a directory
+    pub unsafe fn dir_content_iter(&'a self, first_cluster_idx: ClusterIdx) -> impl Iterator<Item = FatFile> + 'a {
         // iterator over the indices of the clusters containing the directory's content
         let cluster_idx_iter = self.fat_table().file_cluster_iter(first_cluster_idx);
         let pseudo_dentry_iter = FatPseudoDentryIter::new(cluster_idx_iter, &self, self.boot_sector().dentries_per_cluster());
