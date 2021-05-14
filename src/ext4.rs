@@ -1,7 +1,7 @@
 use crate::fat::BootSector;
 use std::convert::TryFrom;
 use std::io;
-use crate::lohi::LoHi64;
+use crate::lohi::LoHiMut;
 use chrono;
 use num::Integer;
 use uuid::Uuid;
@@ -141,7 +141,7 @@ impl SuperBlock {
         sb.s_first_data_block = if bytes_per_block == 1024 { 1 } else { 0 };
         sb.s_blocks_per_group = EXT4_MAX_BLOCKS_PER_GROUP.min(bytes_per_block * 8);
         let block_count = boot_sector.partition_size() / u64::from(bytes_per_block);
-        LoHi64 { lo: &mut sb.s_blocks_count_lo, hi: &mut sb.s_blocks_count_hi }.set(block_count);
+        LoHiMut::new(&mut sb.s_blocks_count_lo, &mut sb.s_blocks_count_hi).set(block_count);
 
         // TODO what
         // Same logic as used in mke2fs: If the last block group would have

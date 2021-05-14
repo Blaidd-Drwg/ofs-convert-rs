@@ -1,4 +1,4 @@
-use crate::lohi::LoHi32;
+use crate::lohi::LoHi;
 use ucs2;
 
 #[repr(C)]
@@ -72,12 +72,11 @@ pub struct FatDentry {
 }
 
 impl FatDentry {
-    // TODO refactor to not need mut
     // TODO refactor to need an unsafe function to create
-    pub fn first_cluster_idx(&mut self) -> u32 {
-        // SAFETY: safe assuming self is aligned, since both fields are 2-byte-aligned within self
+    pub fn first_cluster_idx(&self) -> u32 {
+        // SAFETY: safe assuming self is aligned, since both fields are 2-aligned within self
         unsafe {
-            LoHi32 { lo: &mut self.first_cluster_low, hi: &mut self.first_cluster_high }.get()
+            LoHi::new(&self.first_cluster_low, &self.first_cluster_high).get()
         }
     }
 
