@@ -3,7 +3,6 @@ use std::fmt::Debug;
 use std::convert::TryFrom;
 use std::marker::PhantomData;
 use num::PrimInt;
-// TODO integer or primint?
 
 
 /// Sometimes for space reasons a single 2X-byte wide value is split into two X-byte wide
@@ -23,7 +22,7 @@ where Full: PrimInt + From<Half>,
 	  Half: PrimInt + TryFrom<Full>,
 	  Half::Error: Debug {
 
-	const half_bit_count: usize = std::mem::size_of::<Half>() * 8;
+	const HALF_BIT_COUNT: usize = std::mem::size_of::<Half>() * 8;
 
 	// ideally would be const, but zero is not a const fn
 	fn lower_half_mask() -> Full {
@@ -37,12 +36,12 @@ where Full: PrimInt + From<Half>,
 	pub fn get(&self) -> Full {
 		let hi: Full = (*self.hi).into();
 		let lo: Full = (*self.lo).into();
-		(hi << Self::half_bit_count) + lo
+		(hi << Self::HALF_BIT_COUNT) + lo
 	}
 
 	pub fn set(&mut self, value: Full) {
 		*self.lo = Half::try_from(value & Self::lower_half_mask()).unwrap();
-		*self.hi = Half::try_from(value >> Self::half_bit_count).unwrap();
+		*self.hi = Half::try_from(value >> Self::HALF_BIT_COUNT).unwrap();
 	}
 }
 
@@ -80,12 +79,7 @@ where Full: PrimInt + From<Half>,
 	  Half: PrimInt + TryFrom<Full>,
 	  Half::Error: Debug {
 
-	const half_bit_count: usize = std::mem::size_of::<Half>() * 8;
-
-	// ideally would be const, but zero is not a const fn
-	fn lower_half_mask() -> Full {
-		(!Half::zero()).into()
-	}
+	const HALF_BIT_COUNT: usize = std::mem::size_of::<Half>() * 8;
 
 	pub fn new(lo: &'a Half, hi: &'a Half) -> Self {
 		Self { lo, hi, full: PhantomData }
@@ -94,7 +88,7 @@ where Full: PrimInt + From<Half>,
 	pub fn get(&self) -> Full {
 		let hi: Full = (*self.hi).into();
 		let lo: Full = (*self.lo).into();
-		(hi << Self::half_bit_count) + lo
+		(hi << Self::HALF_BIT_COUNT) + lo
 	}
 }
 

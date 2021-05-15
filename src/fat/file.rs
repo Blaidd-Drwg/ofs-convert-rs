@@ -6,5 +6,5 @@ pub type Extent = Range<u32>;
 pub struct FatFile {
 	pub name: String,
 	pub dentry: FatDentry,
-	pub data: Vec<Extent>,
+	pub data_ranges: Vec<Extent>,
 }

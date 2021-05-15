@@ -1,5 +1,4 @@
 use crate::lohi::LoHi;
-use ucs2;
 
 #[repr(C)]
 pub union FatPseudoDentry {

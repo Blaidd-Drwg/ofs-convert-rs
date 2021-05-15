@@ -1,16 +1,16 @@
-use crate::fat::{BootSector, Cluster, ClusterIdx, FatFileIter, FatEntryIter, FatFile, FatPseudoDentryIter, FatPseudoDentry, FatTable};
+use crate::fat::{BootSector, Cluster, ClusterIdx, FatFileIter, FatClusterIter, FatFile, FatDentry};
 use crate::util::ExactAlign;
 use std::convert::TryFrom;
 use std::mem::size_of;
 use std::ops::Range;
 
-const FIRST_DATA_CLUSTER: ClusterIdx = 2; // the first cluster containing data has the index 2
+const FIRST_ROOT_DIR_CLUSTER_IDX: ClusterIdx = 2; // the first cluster containing data has the index 2
 
 /// A FAT32 partition consists of 3 regions: the reserved sectors (which include the boot sector),
 /// the file allocation table (FAT), and the data region.
 pub struct FatPartition<'a> {
     boot_sector: &'a BootSector,
-    fat_table: FatTable<'a>,
+    fat_table: &'a [ClusterIdx],
     data: &'a mut [u8],
 }
 
@@ -28,8 +28,7 @@ impl<'a> FatPartition<'a> {
         let relative_fat_table_start = fat_table_range.start - bs_bytes.len();
         let data_after_reserved_sectors = &mut data_after_boot_sector[relative_fat_table_start..];
         let (fat_table_bytes, data_after_fat_table) = data_after_reserved_sectors.split_at_mut(fat_table_range.len());
-        let fat_table_data = fat_table_bytes.exact_align_to::<ClusterIdx>();
-        let fat_table = FatTable::new(fat_table_data);
+        let fat_table = fat_table_bytes.exact_align_to::<ClusterIdx>();
 
         let relative_data_start = data_range.start - fat_table_range.end;
         let data = &mut data_after_fat_table[relative_data_start..];
@@ -58,14 +57,11 @@ impl<'a> FatPartition<'a> {
         self.boot_sector
     }
 
-    // TODO assert that alignments are exact. new function convert_slice?
     // TODO all the int type conversions (from, try_from)
     // TODO error concept: return options of results?
-    // new function from_bytes that takes a byte slice and asserts the length is exact?
 
-    pub fn serialize_directory_tree() { }
 
-    pub fn fat_table(&self) -> FatTable {
+    pub fn fat_table(&self) -> &'a [ClusterIdx] {
         self.fat_table
     }
 
@@ -75,23 +71,36 @@ impl<'a> FatPartition<'a> {
 
     pub fn cluster(&self, cluster_idx: ClusterIdx) -> &Cluster {
         let cluster_size = self.cluster_size();
-        let data_byte = usize::try_from(cluster_idx - FIRST_DATA_CLUSTER).unwrap() * cluster_size;
+        let data_byte = usize::try_from(cluster_idx - FIRST_ROOT_DIR_CLUSTER_IDX).unwrap() * cluster_size;
         &self.data[data_byte..data_byte+cluster_size]
     }
 
     pub fn cluster_mut(&mut self, cluster_idx: ClusterIdx) -> &mut Cluster {
         let cluster_size = self.cluster_size();
-        let data_byte = usize::try_from(cluster_idx - FIRST_DATA_CLUSTER).unwrap() * cluster_size;
+        let data_byte = usize::try_from(cluster_idx - FIRST_ROOT_DIR_CLUSTER_IDX).unwrap() * cluster_size;
         &mut self.data[data_byte..data_byte+cluster_size]
     }
 
     /// Given the index of a directory's first cluster, iterate over the directory's content.
     /// SAFETY: safe if `first_cluster_idx` points to a cluster belonging to a directory
     pub unsafe fn dir_content_iter(&'a self, first_cluster_idx: ClusterIdx) -> impl Iterator<Item = FatFile> + 'a {
-        // iterator over the indices of the clusters containing the directory's content
-        let cluster_idx_iter = self.fat_table().file_cluster_iter(first_cluster_idx);
-        let pseudo_dentry_iter = FatPseudoDentryIter::new(cluster_idx_iter, &self, self.boot_sector().dentries_per_cluster());
-        FatFileIter::new(pseudo_dentry_iter)
+        FatFileIter::new(first_cluster_idx, self, self.boot_sector().dentries_per_cluster())
+    }
+
+    pub fn data_ranges(&'a self, first_cluster_idx: ClusterIdx) -> Vec<Range<ClusterIdx>> {
+        let mut current_range = first_cluster_idx..first_cluster_idx + 1; // we don't use RangeInclusive because it does not allow mutating end
+        let mut ranges = Vec::new();
+
+        for cluster_idx in FatClusterIter::new(first_cluster_idx, self.fat_table()) {
+            if cluster_idx == current_range.end {
+                current_range.end += 1;
+            } else {
+                ranges.push(current_range);
+                current_range = cluster_idx..cluster_idx + 1;
+            }
+        }
+        ranges.push(current_range);
+        ranges
     }
 }
 
@@ -112,11 +121,13 @@ mod tests {
         let expected_file_names = HashSet::from_iter(EXPECTED_FILE_NAMES.iter().map(|s| s.to_string()));
 
         let mut partition = Partition::open("examples/fat.master.bak").unwrap();
-        let fat_partition = unsafe { FatPartition::new(partition.as_mut_slice()) };
-        let file_names: HashSet<_> = fat_partition
-            .dir_content_iter(FIRST_DATA_CLUSTER)
-            .map(|file| file.name)
-            .collect();
-        assert_eq!(file_names, expected_file_names);
+        unsafe {
+            let fat_partition = FatPartition::new(partition.as_mut_slice());
+            let file_names: HashSet<_> = fat_partition
+                .dir_content_iter(FIRST_ROOT_DIR_CLUSTER_IDX)
+                .map(|file| file.name)
+                .collect();
+            assert_eq!(file_names, expected_file_names);
+        }
     }
 }
