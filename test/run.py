@@ -21,7 +21,9 @@ class OfsConvertTest(unittest.TestCase):
         tool_timeout = os.environ.get('OFS_CONVERT_TOOL_TIMEOUT')
         tool_timeout = int(tool_timeout) if tool_timeout else None
         tests_dir = pathlib.Path(tests_dir)
-        input_dirs = (e for e in tests_dir.glob('**/*.test') if e.is_dir())
+        input_dirs = [e for e in tests_dir.glob('**/*.test') if e.is_dir()]
+        if tests_dir.is_dir() and tests_dir.name.endswith('.test'):
+            input_dirs.append(tests_dir)
         for input_dir in input_dirs:
             cls._add_test_method(tests_dir, input_dir, tool_timeout)
 
