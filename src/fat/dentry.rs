@@ -1,4 +1,5 @@
 use crate::lohi::LoHi;
+use crate::fat::FIRST_ROOT_DIR_CLUSTER_IDX;
 
 #[repr(C)]
 pub union FatPseudoDentry {
@@ -53,7 +54,7 @@ impl FatPseudoDentry {
 }
 
 #[repr(C, packed)]
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Default)]
 pub struct FatDentry {
     pub short_name: [u8; 8],
     pub short_extension: [u8; 3],
@@ -71,12 +72,24 @@ pub struct FatDentry {
 }
 
 impl FatDentry {
+    const DIR_FLAG: u8 = 0x10;
+
+    pub fn root_dentry() -> Self {
+        // temporary solution for compatibility with ofs-convert, no value from the root
+        // dentry is actually read
+        Self::default()
+    }
+
     // TODO refactor to need an unsafe function to create
     pub fn first_cluster_idx(&self) -> u32 {
         // SAFETY: safe assuming self is aligned, since both fields are 2-aligned within self
         unsafe {
             LoHi::new(&self.first_cluster_low, &self.first_cluster_high).get()
         }
+    }
+
+    pub fn is_dir(&self) -> bool {
+        self.attrs & Self::DIR_FLAG != 0
     }
 
     /// True iff the dentry represents either the current directory `.` or the parent directory `..`

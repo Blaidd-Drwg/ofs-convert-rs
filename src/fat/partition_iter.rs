@@ -38,6 +38,7 @@ impl<'a, I> Iterator for FatFileIter<'a, I> where I: Iterator<Item = &'a FatPseu
         let file = FatFile {
             name: file_name,
             dentry: *dentry,
+            lfn_entries: Vec::new(), // TODO
             data_ranges: self.partition.data_ranges(dentry.first_cluster_idx()),
         };
         Some(file)

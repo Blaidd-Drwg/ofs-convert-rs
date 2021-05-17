@@ -82,11 +82,15 @@ void resettle_extent(uint32_t cluster_no, bool is_dir_flag, StreamArchiver* writ
     }
 }
 
+// split extent into fragments which completely overlap blocked extents and fragments that are completely disjoint from blocked extents. copy blocked fragments to newly allocated fragments. write all fragments to write_stream
+// cluster_no, is_dir are just for the visualizer
 void find_blocked_extent_fragments(uint32_t cluster_no, bool is_dir_flag, StreamArchiver* write_stream, const fat_extent& input_extent) {
     uint32_t input_physical_end = input_extent.physical_start + input_extent.length,
              fragment_physical_start = input_extent.physical_start,
              i = find_first_blocked_extent(input_extent.physical_start);
+    // a blocked extent that overlaps input_extent, or NULL if there are no more
     fat_extent* blocked_extent = find_next_blocked_extent(i, input_physical_end);
+    i++;
     while(fragment_physical_start < input_physical_end) {
         uint32_t fragment_physical_end = input_physical_end;
         bool is_blocked = blocked_extent && blocked_extent->physical_start <= fragment_physical_start;
@@ -95,6 +99,7 @@ void find_blocked_extent_fragments(uint32_t cluster_no, bool is_dir_flag, Stream
             if(blocked_physical_end < fragment_physical_end)
                 fragment_physical_end = blocked_physical_end;
             blocked_extent = find_next_blocked_extent(i, input_physical_end);
+            i++;
         } else if(blocked_extent)
             fragment_physical_end = blocked_extent->physical_start;
 
@@ -114,6 +119,7 @@ void find_blocked_extent_fragments(uint32_t cluster_no, bool is_dir_flag, Stream
     }
 }
 
+// creates from FAT and writes them
 void aggregate_extents(uint32_t cluster_no, bool is_dir_flag, StreamArchiver* write_stream) {
     if(!is_dir_flag)
         visualizer_add_tag(cluster_no);
@@ -145,6 +151,52 @@ fat_dentry* read_lfn(fat_dentry* first_entry, StreamArchiver* extent_stream, uin
         entry = reinterpret_cast<uint8_t*>(next_dentry(state));
     }
     return reinterpret_cast<fat_dentry*>(entry);
+}
+
+void add_file(
+        StreamArchiver* write_stream,
+        fat_dentry dentry,
+        const uint16_t lfn_entries[],
+        size_t lfn_entry_count,
+        const fat_extent extents[],
+        size_t extent_count) {
+    fat_dentry* archive_dentry = reserve_dentry(write_stream);
+    uint16_t* archive_name[lfn_entry_count];
+    reserve_name(archive_name, lfn_entry_count, write_stream);
+    for(int i = 0; i < lfn_entry_count; i++) {
+        memcpy(&archive_name[i], &lfn_entries[i], LFN_ENTRY_LENGTH);
+    }
+    memcpy(archive_dentry, &dentry, sizeof dentry);
+    for(int i = 0; i < extent_count; i++) {
+        // breaks visualizer
+        find_blocked_extent_fragments(0, false, write_stream, extents[i]);
+    }
+}
+
+// TODO handle root
+// TODO what do I need the logical_start in extents for?
+void add_regular_file(
+        StreamArchiver* write_stream,
+        fat_dentry dentry,
+        const uint16_t lfn_entries[],
+        size_t lfn_entry_count,
+        const fat_extent extents[],
+        size_t extent_count) {
+    add_file(write_stream, dentry, lfn_entries, lfn_entry_count, extents, extent_count);
+    *reserve_children_count(write_stream) = -1;
+}
+
+uint32_t* add_dir(
+        StreamArchiver* write_stream,
+        fat_dentry dentry,
+        const uint16_t lfn_entries[],
+        size_t lfn_entry_count,
+        const fat_extent extents[],
+        size_t extent_count) {
+    add_file(write_stream, dentry, lfn_entries, lfn_entry_count, extents, extent_count);
+    uint32_t* children_count = reserve_children_count(write_stream);
+    *children_count = 0;
+    return children_count;
 }
 
 void traverse(StreamArchiver* dir_extent_stream, StreamArchiver* write_stream) {

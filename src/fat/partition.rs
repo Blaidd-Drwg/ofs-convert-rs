@@ -1,10 +1,10 @@
-use crate::fat::{BootSector, Cluster, ClusterIdx, FatFileIter, FatClusterIter, FatFile, FatDentry};
+use crate::fat::{FIRST_ROOT_DIR_CLUSTER_IDX, BootSector, Cluster, ClusterIdx, FatFileIter, FatClusterIter, FatFile, FatDentry};
+use crate::c_wrapper::{c_serialize_directory, c_serialize_file};
 use crate::util::ExactAlign;
 use std::convert::TryFrom;
 use std::mem::size_of;
 use std::ops::Range;
 
-const FIRST_ROOT_DIR_CLUSTER_IDX: ClusterIdx = 2; // the first cluster containing data has the index 2
 
 /// A FAT32 partition consists of 3 regions: the reserved sectors (which include the boot sector),
 /// the file allocation table (FAT), and the data region.
@@ -60,6 +60,36 @@ impl<'a> FatPartition<'a> {
     // TODO all the int type conversions (from, try_from)
     // TODO error concept: return options of results?
 
+    pub fn serialize_directory_tree(&mut self) {
+        let root_file = FatFile {
+            name: "".to_string(),
+            lfn_entries: Vec::new(),
+            dentry: FatDentry::root_dentry(),
+            data_ranges: self.data_ranges(FIRST_ROOT_DIR_CLUSTER_IDX)
+        };
+        unsafe {
+            self.serialize_directory(root_file);
+        }
+    }
+
+    unsafe fn serialize_directory(&self, file: FatFile) {
+        let child_count_ptr = c_serialize_directory(&file);
+        let first_cluster_idx = file.dentry.first_cluster_idx();
+        for file in self.dir_content_iter(first_cluster_idx) {
+            unsafe {
+                *child_count_ptr += 1;
+            }
+            if file.dentry.is_dir() {
+                self.serialize_directory(file);
+            } else {
+                self.serialize_file(file);
+            }
+        }
+    }
+
+    fn serialize_file(&self, file: FatFile) {
+        let child_count_ptr = c_serialize_file(&file);
+    }
 
     pub fn fat_table(&self) -> &'a [ClusterIdx] {
         self.fat_table

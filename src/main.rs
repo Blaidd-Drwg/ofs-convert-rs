@@ -3,26 +3,15 @@ mod fat;
 mod ext4;
 mod lohi;
 mod util;
+mod c_wrapper;
 // mod allocator;
 
-use partition::Partition;
+use crate::partition::Partition;
+use crate::c_wrapper::c_initialize;
 
 use std::env::args;
-use std::os::raw::c_int;
 use std::io;
 
-
-extern "C" {
-    #[link_name = "\u{1}_Z6c_main9Partition16ext4_super_block11boot_sector"]
-    pub fn c_main(partition: CPartition, superblock: ext4::SuperBlock, boot_sector: fat::BootSector) -> c_int;
-}
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct CPartition {
-    pub size: usize,
-    pub ptr: *mut u8,
-}
 
 fn main() {
     if args().len() != 2 {
@@ -52,7 +41,7 @@ fn ofs_convert(partition_path: &str) -> io::Result<()> {
         let fat_partition = fat::FatPartition::new(partition.as_mut_slice());
         let boot_sector = *fat_partition.boot_sector();
         let superblock = ext4::SuperBlock::new(&boot_sector)?;
-        c_main(CPartition{size: partition.size(), ptr: partition.as_mut_ptr()}, superblock, boot_sector);
+        c_initialize(&mut partition, superblock, boot_sector);
     }
     // traverse, save metadata, move conflicting data
     // write block group headers (breaks FAT)

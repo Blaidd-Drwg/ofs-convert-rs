@@ -79,12 +79,14 @@ fat_extent allocate_extent(uint16_t max_length) {
     return result;
 }
 
+// returns the index of the first blocked_extent that ends after (or at) `physical_address`
 uint32_t find_first_blocked_extent(uint32_t physical_address) {
     uint32_t begin = 0, mid, end = allocator.blocked_extent_count;
     while(begin < end) {
         mid = (begin+end)/2;
         fat_extent* blocked_extent = &allocator.blocked_extents[mid];
-        if(blocked_extent->physical_start + blocked_extent->length < physical_address)
+        uint32_t blocked_extent_end = blocked_extent->physical_start + blocked_extent->length;
+        if(blocked_extent_end < physical_address)
             begin = mid+1;
         else
             end = mid;
@@ -92,10 +94,11 @@ uint32_t find_first_blocked_extent(uint32_t physical_address) {
     return begin;
 }
 
-fat_extent* find_next_blocked_extent(uint32_t& i, uint32_t physical_end) {
+// returns the i-th blocked extent if it starts before `physical_end` (i.e. overlaps with the other extent), or NULL otherwise
+fat_extent* find_next_blocked_extent(uint32_t i, uint32_t physical_end) {
     if(i >= allocator.blocked_extent_count)
         return NULL;
-    fat_extent* blocked_extent = &allocator.blocked_extents[i++];
+    fat_extent* blocked_extent = &allocator.blocked_extents[i];
     if(physical_end < blocked_extent->physical_start)
         return NULL;
     return blocked_extent;
