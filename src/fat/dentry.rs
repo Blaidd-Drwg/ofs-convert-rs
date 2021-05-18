@@ -152,11 +152,16 @@ impl LongFileName {
         self.sequence_no & 0b00011111
     }
 
+    // TODO handle Errors
     pub fn to_utf8_string(&self) -> String {
-        Self::ucs2_to_string(&self.to_ucs2_string())
+        std::char::decode_utf16(self.to_utf16_string()).map(|utf16_char| utf16_char.unwrap()).collect()
     }
 
-    fn to_ucs2_string(&self) -> Vec<u16> {
+    // By the standard, long file names are encoded in UCS-2. However, the Linux implementation
+    // actually uses UTF-16. UTF-16 is backwards compatible with UCS-2 and can encode a superset
+    // of the characters encodable with UCS-2, so to support files written by Linux that contain
+    // these characters, we treat the file names as UTF-16.
+    fn to_utf16_string(&self) -> Vec<u16> {
         // copy since name_1 and name_2 are unaligned, so borrowing them is undefined behavior
         let name_1 = self.name_1;
         let name_2 = self.name_2;
@@ -168,14 +173,5 @@ impl LongFileName {
         ucs_string.extend_from_slice(&name_3);
 
         ucs_string.into_iter().take_while(|&character| character != 0x0000).collect()
-    }
-
-    fn ucs2_to_string(ucs2_string: &[u16]) -> String {
-        let mut utf8_bytes = Vec::new();
-        ucs2::decode_with(&ucs2_string, |char_bytes| {
-            utf8_bytes.extend_from_slice(char_bytes);
-            Ok(())
-        }).unwrap(); // TODO
-        String::from_utf8(utf8_bytes).unwrap() // TODO
     }
 }
