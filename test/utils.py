@@ -110,6 +110,8 @@ class ImageMounter:
         def mount(self, image_path, fs_type, readonly):
             mount_point = self._make_mount_point(fs_type)
             args = ['mount', '-o', 'loop', '-t', fs_type.name.lower()]
+            if fs_type == FsType.VFAT:
+                args += ['-o', 'utf8']
             if readonly:
                 args.append('--read-only')
             args.extend([str(image_path), str(mount_point)])
