@@ -7,7 +7,7 @@ mod c_wrapper;
 // mod allocator;
 
 use crate::partition::Partition;
-use crate::c_wrapper::c_initialize;
+use crate::c_wrapper::{c_initialize, c_convert};
 
 use std::env::args;
 use std::io;
@@ -35,13 +35,18 @@ fn print_help() {
     println!("Usage: ofs-convert-rs path/to/fat-partition");
 }
 
+// TODO handle root
 fn ofs_convert(partition_path: &str) -> io::Result<()> {
     let mut partition = Partition::open(partition_path)?;
     unsafe {
         let fat_partition = fat::FatPartition::new(partition.as_mut_slice());
         let boot_sector = *fat_partition.boot_sector();
         let superblock = ext4::SuperBlock::new(&boot_sector)?;
-        c_initialize(&mut partition, superblock, boot_sector);
+        let mut stream_archiver = c_initialize(&mut partition, superblock, boot_sector);
+        let mut read_stream = stream_archiver;
+        let mut fat_partition = fat::FatPartition::new(partition.as_mut_slice());
+        fat_partition.serialize_directory_tree(&mut stream_archiver);
+        c_convert(&mut partition, &mut read_stream);
     }
     // traverse, save metadata, move conflicting data
     // write block group headers (breaks FAT)

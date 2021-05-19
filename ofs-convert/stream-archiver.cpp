@@ -24,8 +24,10 @@ void cutStreamArchiver(StreamArchiver* stream) {
     stream->header = reinterpret_cast<StreamArchiver::Header*>(iterateStreamArchiver(stream, true, sizeof(StreamArchiver::Header), 0));
 }
 
+// header->elementCount is only valid after the cut, before it's garbage
 void* iterateStreamArchiver(StreamArchiver* stream, bool insert, uint64_t elementLength, uint64_t elementCount) {
     stream->elementIndex += elementCount;
+    // we have reached a cut
     if(!insert && elementCount > 0 && stream->elementIndex > stream->header->elementCount) {
         stream->elementIndex = 0;
         stream->header = reinterpret_cast<StreamArchiver::Header*>(iterateStreamArchiver(stream, insert, sizeof(StreamArchiver::Header), 0));

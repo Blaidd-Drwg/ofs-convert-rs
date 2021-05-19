@@ -1,5 +1,5 @@
 use crate::fat::{FIRST_ROOT_DIR_CLUSTER_IDX, BootSector, Cluster, ClusterIdx, FatFileIter, FatClusterIter, FatFile, FatDentry};
-use crate::c_wrapper::{c_serialize_directory, c_serialize_file};
+use crate::c_wrapper::{c_serialize_directory, c_serialize_file, StreamArchiver};
 use crate::util::ExactAlign;
 use std::convert::TryFrom;
 use std::mem::size_of;
@@ -60,7 +60,8 @@ impl<'a> FatPartition<'a> {
     // TODO all the int type conversions (from, try_from)
     // TODO error concept: return options of results?
 
-    pub fn serialize_directory_tree(&mut self) {
+    // TODO read clusters from data_ranges instead of from the FAT
+    pub fn serialize_directory_tree(&mut self, stream_archiver: *mut StreamArchiver) {
         let root_file = FatFile {
             name: "".to_string(),
             lfn_entries: Vec::new(),
@@ -68,27 +69,25 @@ impl<'a> FatPartition<'a> {
             data_ranges: self.data_ranges(FIRST_ROOT_DIR_CLUSTER_IDX)
         };
         unsafe {
-            self.serialize_directory(root_file);
+            self.serialize_directory(root_file, stream_archiver);
         }
     }
 
-    unsafe fn serialize_directory(&self, file: FatFile) {
-        let child_count_ptr = c_serialize_directory(&file);
+    unsafe fn serialize_directory(&self, file: FatFile, stream_archiver: *mut StreamArchiver) {
+        let child_count_ptr = c_serialize_directory(&file, stream_archiver);
         let first_cluster_idx = file.dentry.first_cluster_idx();
         for file in self.dir_content_iter(first_cluster_idx) {
-            unsafe {
-                *child_count_ptr += 1;
-            }
+            *child_count_ptr += 1;
             if file.dentry.is_dir() {
-                self.serialize_directory(file);
+                self.serialize_directory(file, stream_archiver);
             } else {
-                self.serialize_file(file);
+                self.serialize_file(file, stream_archiver);
             }
         }
     }
 
-    fn serialize_file(&self, file: FatFile) {
-        let child_count_ptr = c_serialize_file(&file);
+    fn serialize_file(&self, file: FatFile, stream_archiver: *mut StreamArchiver) {
+        c_serialize_file(&file, stream_archiver);
     }
 
     pub fn fat_table(&self) -> &'a [ClusterIdx] {
@@ -118,7 +117,7 @@ impl<'a> FatPartition<'a> {
     }
 
     pub fn data_ranges(&'a self, first_cluster_idx: ClusterIdx) -> Vec<Range<ClusterIdx>> {
-        let mut current_range = first_cluster_idx..first_cluster_idx + 1; // we don't use RangeInclusive because it does not allow mutating end
+        let mut current_range = first_cluster_idx..first_cluster_idx; // we don't use RangeInclusive because it does not allow mutating end
         let mut ranges = Vec::new();
 
         for cluster_idx in FatClusterIter::new(first_cluster_idx, self.fat_table()) {

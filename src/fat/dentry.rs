@@ -1,4 +1,4 @@
-use crate::lohi::LoHi;
+use crate::lohi::{LoHi, LoHiMut};
 use crate::fat::FIRST_ROOT_DIR_CLUSTER_IDX;
 
 #[repr(C)]
@@ -74,10 +74,16 @@ pub struct FatDentry {
 impl FatDentry {
     const DIR_FLAG: u8 = 0x10;
 
+    // TODO just return default once we don't need to read the cluster from here
     pub fn root_dentry() -> Self {
         // temporary solution for compatibility with ofs-convert, no value from the root
         // dentry is actually read
-        Self::default()
+        let mut instance = Self::default();
+        // SAFETY: safe assuming self is aligned, since both fields are 2-aligned within self
+        unsafe {
+            LoHiMut::new(&mut instance.first_cluster_low, &mut instance.first_cluster_high).set(FIRST_ROOT_DIR_CLUSTER_IDX);
+        }
+        instance
     }
 
     // TODO refactor to need an unsafe function to create
@@ -113,7 +119,7 @@ impl FatDentry {
     // TODO what encoding do FAT short names use?  Assume ascii for now
     pub fn read_short_file_name(&self) -> String {
         let name_ascii_bytes: Vec<_> = self.short_name.iter().copied().collect();
-        let mut name_string = String::from_utf8(name_ascii_bytes).unwrap();
+        let mut name_string = String::from_utf8(name_ascii_bytes).unwrap().trim_end().to_string();
         if self.has_lowercase_name() {
             name_string.make_ascii_lowercase();
         }
@@ -161,7 +167,7 @@ impl LongFileName {
     // actually uses UTF-16. UTF-16 is backwards compatible with UCS-2 and can encode a superset
     // of the characters encodable with UCS-2, so to support files written by Linux that contain
     // these characters, we treat the file names as UTF-16.
-    fn to_utf16_string(&self) -> Vec<u16> {
+    pub fn to_utf16_string(&self) -> Vec<u16> {
         // copy since name_1 and name_2 are unaligned, so borrowing them is undefined behavior
         let name_1 = self.name_1;
         let name_2 = self.name_2;

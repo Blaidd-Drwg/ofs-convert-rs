@@ -6,24 +6,31 @@ use std::os::raw::c_int;
 use std::convert::{TryInto, TryFrom};
 
 extern "C" {
-    #[link_name = "\u{1}_Z6c_main9Partition16ext4_super_block11boot_sector"]
-    pub fn c_main(partition: CPartition, superblock: SuperBlock, boot_sector: BootSector) -> c_int;
+    #[link_name = "\u{1}_Z10initialize9Partition16ext4_super_block11boot_sector"]
+    pub fn initialize(
+        partition: CPartition,
+        _sb: SuperBlock,
+        _boot_sector: BootSector,
+    ) -> StreamArchiver;
 
-    #[link_name = "\u{1}_Z16add_regular_fileP14StreamArchiver10fat_dentryPtmP10fat_extentm"]
+    #[link_name = "\u{1}_Z7convert9PartitionP14StreamArchiver"]
+    pub fn convert(partition: CPartition, read_stream: *mut StreamArchiver);
+
+    #[link_name = "\u{1}_Z16add_regular_fileP14StreamArchiver10fat_dentryPKPKtmPK10fat_extentm"]
     pub fn add_regular_file(
         write_stream: *mut StreamArchiver,
         dentry: FatDentry,
-        lfn_entries: *const u16,
+        lfn_entries: *const *const u16,
         lfn_entry_count: usize,
         extents: *const CExtent,
         extent_count: usize,
     );
 
-    #[link_name = "\u{1}_Z7add_dirP14StreamArchiver10fat_dentryPtmP10fat_extentm"]
+    #[link_name = "\u{1}_Z7add_dirP14StreamArchiver10fat_dentryPKPKtmPK10fat_extentm"]
     pub fn add_dir(
         write_stream: *mut StreamArchiver,
         dentry: FatDentry,
-        lfn_entries: *const u16,
+        lfn_entries: *const *const u16,
         lfn_entry_count: usize,
         extents: *const CExtent,
         extent_count: usize,
@@ -50,30 +57,45 @@ pub struct CExtent {
 #[derive(Debug, Copy, Clone)]
 pub struct StreamArchiver {
     page_placeholder: *mut u8,
-    offsetInPage: u64,
-    elementIndex: u64,
+    offset_in_page: u64,
+    element_index: u64,
     header_placeholder: *mut u8,
 }
 
-pub unsafe fn c_initialize(partition: &mut Partition, superblock: SuperBlock, boot_sector: BootSector) {
-    c_main(CPartition{size: partition.size(), ptr: partition.as_mut_ptr()}, superblock, boot_sector);
+pub unsafe fn c_initialize(partition: &mut Partition, superblock: SuperBlock, boot_sector: BootSector) -> StreamArchiver {
+    initialize(CPartition{size: partition.size(), ptr: partition.as_mut_ptr()}, superblock, boot_sector)
 }
 
-pub fn c_serialize_file(file: &FatFile) {
-    unimplemented!()
+pub unsafe fn c_convert(partition: &mut Partition, stream_archiver: *mut StreamArchiver) {
+    convert(CPartition{size: partition.size(), ptr: partition.as_mut_ptr()}, stream_archiver);
 }
 
-pub fn c_serialize_directory(file: &FatFile) -> *mut u32 {
+pub fn c_serialize_file(file: &FatFile, stream_archiver: *mut StreamArchiver) {
     let c_extents = to_c_extents(&file.data_ranges);
-    // add_dir(
-        // write_stream,
-        // file.dentry,
-        // file.lfn_entries.as_ptr(),
-        // file.lfn_entries.len(),
-        // c_extents.as_ptr(),
-        // c_extents.len()
-    // )
-    unimplemented!()
+    unsafe {
+        add_regular_file(
+            stream_archiver,
+            file.dentry,
+            file.lfn_entries.iter().map(|entry| entry.as_ptr()).collect::<Vec<_>>().as_ptr(),
+            file.lfn_entries.len(),
+            c_extents.as_ptr(),
+            c_extents.len()
+        );
+    }
+}
+
+pub fn c_serialize_directory(file: &FatFile, stream_archiver: *mut StreamArchiver) -> *mut u32 {
+    let c_extents = to_c_extents(&file.data_ranges);
+    unsafe {
+        add_dir(
+            stream_archiver,
+            file.dentry,
+            file.lfn_entries.iter().map(|entry| entry.as_ptr()).collect::<Vec<_>>().as_ptr(),
+            file.lfn_entries.len(),
+            c_extents.as_ptr(),
+            c_extents.len()
+        )
+    }
 }
 
 fn to_c_extents(data_ranges: &[Extent]) -> Vec<CExtent> {

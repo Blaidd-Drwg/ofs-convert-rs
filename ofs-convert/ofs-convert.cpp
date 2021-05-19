@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-int c_main(Partition partition, ext4_super_block _sb, struct boot_sector _boot_sector) {
+StreamArchiver initialize(Partition partition, ext4_super_block _sb, struct boot_sector _boot_sector) {
     sb = _sb;
     boot_sector = _boot_sector;
 
@@ -21,21 +21,21 @@ int c_main(Partition partition, ext4_super_block _sb, struct boot_sector _boot_s
 
     StreamArchiver write_stream;
     init_stream_archiver(&write_stream, meta_info.cluster_size);
-    // a StreamArchiver only keeps a reference to the page list's tail, to read it afterwards we have to copy the head.
-    StreamArchiver extent_stream = write_stream;
-    StreamArchiver read_stream = write_stream;
+    return write_stream;
+}
 
     // root has no name, so we handle its extents separately
-    aggregate_extents(boot_sector.root_cluster_no, true, &write_stream);
-    traverse(&extent_stream, &write_stream);
-
-
+    // aggregate_extents(boot_sector.root_cluster_no, true, &write_stream);
+    // traverse(&extent_stream, &write_stream);
+void convert(Partition partition, StreamArchiver* read_stream) {
     init_ext4_group_descs();
     build_ext4_root();
-    build_ext4_metadata_tree(EXT4_ROOT_INODE, EXT4_ROOT_INODE, &read_stream);
+    getNext<fat_dentry>(read_stream); // skip fake root dentry
+    getNext<fat_dentry>(read_stream); // consume cut
+    iterateStreamArchiver(read_stream, false, 0); // fake root name has zero entries, consume cut
+    build_ext4_metadata_tree(EXT4_ROOT_INODE, EXT4_ROOT_INODE, read_stream);
     build_lost_found();
     finalize_block_groups_on_disk();
 
     visualizer_render_to_file("partition.svg", partition.size / meta_info.cluster_size);
-    return 0;
 }

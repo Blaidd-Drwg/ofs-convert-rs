@@ -13,3 +13,11 @@ impl<T> ExactAlign for [T] {
 		target
 	}
 }
+
+/// Stopgap function to convert an ASCII string from a FAT short name into a null-terminated UTF-16 string like
+/// from a FAT long name
+pub fn short_name_to_long_name(short_name: &str) -> Vec<u16> {
+	let mut name: Vec<_> = short_name.chars().map(|c| c as u16).collect();
+	name.push(0);
+	name
+}

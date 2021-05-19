@@ -156,7 +156,7 @@ fat_dentry* read_lfn(fat_dentry* first_entry, StreamArchiver* extent_stream, uin
 void add_file(
         StreamArchiver* write_stream,
         fat_dentry dentry,
-        const uint16_t lfn_entries[],
+        const uint16_t* const lfn_entries[],
         size_t lfn_entry_count,
         const fat_extent extents[],
         size_t extent_count) {
@@ -164,13 +164,14 @@ void add_file(
     uint16_t* archive_name[lfn_entry_count];
     reserve_name(archive_name, lfn_entry_count, write_stream);
     for(int i = 0; i < lfn_entry_count; i++) {
-        memcpy(&archive_name[i], &lfn_entries[i], LFN_ENTRY_LENGTH);
+        memcpy(archive_name[i], lfn_entries[i], LFN_ENTRY_LENGTH* (sizeof *lfn_entries[i]));
     }
     memcpy(archive_dentry, &dentry, sizeof dentry);
     for(int i = 0; i < extent_count; i++) {
         // breaks visualizer
         find_blocked_extent_fragments(0, false, write_stream, extents[i]);
     }
+    cutStreamArchiver(write_stream);
 }
 
 // TODO handle root
@@ -178,7 +179,7 @@ void add_file(
 void add_regular_file(
         StreamArchiver* write_stream,
         fat_dentry dentry,
-        const uint16_t lfn_entries[],
+        const uint16_t* const lfn_entries[],
         size_t lfn_entry_count,
         const fat_extent extents[],
         size_t extent_count) {
@@ -189,7 +190,7 @@ void add_regular_file(
 uint32_t* add_dir(
         StreamArchiver* write_stream,
         fat_dentry dentry,
-        const uint16_t lfn_entries[],
+        const uint16_t* const lfn_entries[],
         size_t lfn_entry_count,
         const fat_extent extents[],
         size_t extent_count) {
