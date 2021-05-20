@@ -1,3 +1,5 @@
+#[allow(dead_code)]
+mod ranges;
 mod partition;
 mod fat;
 mod ext4;

@@ -24,9 +24,6 @@ StreamArchiver initialize(Partition partition, ext4_super_block _sb, struct boot
     return write_stream;
 }
 
-    // root has no name, so we handle its extents separately
-    // aggregate_extents(boot_sector.root_cluster_no, true, &write_stream);
-    // traverse(&extent_stream, &write_stream);
 void convert(Partition partition, StreamArchiver* read_stream) {
     init_ext4_group_descs();
     build_ext4_root();

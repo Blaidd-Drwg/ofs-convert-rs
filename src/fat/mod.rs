@@ -12,7 +12,7 @@ pub use self::partition::*;
 pub use self::partition_iter::*;
 pub use self::file::*;
 
-type ClusterIdx = u32;
-type Cluster = [u8];
+pub type ClusterIdx = u32;
+pub type Cluster = [u8];
 
 const FIRST_ROOT_DIR_CLUSTER_IDX: ClusterIdx = 2; // the first cluster containing data has the index 2
