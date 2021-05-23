@@ -13,7 +13,10 @@ use crate::c_wrapper::{c_initialize, c_convert};
 
 use std::env::args;
 use std::io;
+use static_assertions::const_assert;
 
+// u32 must fit into usize
+const_assert!(std::mem::size_of::<usize>() >= std::mem::size_of::<u32>());
 
 fn main() {
     if args().len() != 2 {

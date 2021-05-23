@@ -98,16 +98,18 @@ pub fn c_serialize_directory(file: &FatFile, stream_archiver: *mut StreamArchive
     }
 }
 
+// TODO type conversions
 fn to_c_extents(data_ranges: &[Extent]) -> Vec<CExtent> {
     let mut extent_start = 0;
     data_ranges.iter()
         .map(|range| {
+            let len = range.end.get() - range.start.get();
             let c_extent = CExtent {
                 logical_start: extent_start,
-                length: range.len().try_into().unwrap(),
-                physical_start: range.start,
+                length: len.try_into().unwrap(),
+                physical_start: range.start.get(),
             };
-            extent_start += u32::try_from(range.len()).unwrap();
+            extent_start += u32::try_from(len).unwrap();
             c_extent
         })
         .collect()

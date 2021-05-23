@@ -30,6 +30,7 @@ where Full: PrimInt + From<Half>,
 	}
 
 	pub fn new(lo: &'a mut Half, hi: &'a mut Half) -> Self {
+		assert_eq!(2 * std::mem::size_of::<Half>(), std::mem::size_of::<Full>(), "Attempting to create a LoHi where `Half` is not half the size of `Full`.");
 		Self { lo, hi, full: PhantomData }
 	}
 

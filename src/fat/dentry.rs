@@ -1,5 +1,5 @@
 use crate::lohi::{LoHi, LoHiMut};
-use crate::fat::FIRST_ROOT_DIR_CLUSTER_IDX;
+use crate::fat::{ROOT_FAT_IDX, FatTableIndex};
 
 #[repr(C)]
 pub union FatPseudoDentry {
@@ -64,10 +64,10 @@ pub struct FatDentry {
     pub create_time: u16,
     pub create_date: u16,
     pub access_date: u16,
-    pub first_cluster_high: u16,
+    pub first_fat_index_hi: u16,
     pub mod_time: u16,
     pub mod_date: u16,
-    pub first_cluster_low: u16,
+    pub first_fat_index_lo: u16,
     pub file_size: u32,
 }
 
@@ -81,17 +81,18 @@ impl FatDentry {
         let mut instance = Self::default();
         // SAFETY: safe assuming self is aligned, since both fields are 2-aligned within self
         unsafe {
-            LoHiMut::new(&mut instance.first_cluster_low, &mut instance.first_cluster_high).set(FIRST_ROOT_DIR_CLUSTER_IDX);
+            LoHiMut::new(&mut instance.first_fat_index_lo, &mut instance.first_fat_index_hi).set(ROOT_FAT_IDX.get());
         }
         instance
     }
 
     // TODO refactor to need an unsafe function to create
-    pub fn first_cluster_idx(&self) -> u32 {
+    pub fn first_fat_index(&self) -> FatTableIndex {
         // SAFETY: safe assuming self is aligned, since both fields are 2-aligned within self
-        unsafe {
-            LoHi::new(&self.first_cluster_low, &self.first_cluster_high).get()
-        }
+        let idx = unsafe {
+            LoHi::new(&self.first_fat_index_lo, &self.first_fat_index_hi).get()
+        };
+        FatTableIndex::new(idx)
     }
 
     pub fn is_dir(&self) -> bool {

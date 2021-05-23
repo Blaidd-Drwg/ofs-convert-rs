@@ -1,4 +1,5 @@
 use crate::fat::FatDentry;
+use std::ops::Range;
 use std::convert::TryFrom;
 
 #[repr(C, packed)]
@@ -34,6 +35,21 @@ pub struct BootSector {
 }
 
 impl BootSector {
+    /// Returns the range in bytes of the first FAT table, relative to the partition start
+    pub fn get_fat_table_range(&self) -> Range<usize> {
+        let fat_table_start_byte = usize::from(self.sectors_before_fat) * usize::from(self.bytes_per_sector);
+        let fat_table_len = usize::try_from(self.sectors_per_fat).unwrap() * usize::from(self.bytes_per_sector);
+        fat_table_start_byte .. fat_table_start_byte + fat_table_len
+    }
+
+    /// Returns the range in bytes of the data region, relative to the partition start
+    pub fn get_data_range(&self) -> Range<usize> {
+        let sectors_before_data = usize::from(self.sectors_before_fat) + (usize::try_from(self.sectors_per_fat).unwrap() * usize::from(self.fat_count));
+        let bytes_before_data = sectors_before_data * usize::from(self.bytes_per_sector);
+        let partition_size = usize::from(self.bytes_per_sector) * usize::try_from(self.sector_count()).unwrap();
+        bytes_before_data .. partition_size
+    }
+
     pub fn sector_count(&self) -> u32 {
         if self.sector_count_1 != 0 {
            u32::from(self.sector_count_1)
