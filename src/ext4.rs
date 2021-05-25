@@ -124,6 +124,11 @@ pub struct SuperBlock {
 
 impl SuperBlock {
     pub fn new(boot_sector: &BootSector) -> io::Result<Self> {
+        if boot_sector.get_data_range().start % boot_sector.cluster_size() as usize != 0 {
+            // We want to treat FAT clusters as ext4 blocks, but we can't if they're not aligned
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "The FAT partition's must be aligned to its cluster size (for more info, see the -a option in the mkfs.fat man page)."));
+        }
+
         // SAFETY: This allows us to skip initializing a ton of fields to zero, but
         // CAUTION: some initialization steps rely on other fields already having been set,
         // so pay attention when refactoring/reoreding steps.
@@ -132,7 +137,7 @@ impl SuperBlock {
         let block_size = boot_sector.cluster_size();
         // TODO document why
         if block_size < 1024 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "This tool only works for FAT partitions with cluster size >= 1kB"));
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "The FAT partition's cluster size must be >= 1kB"));
         }
 
         let log_block_size = f64::from(block_size).log2().round() as u32;
