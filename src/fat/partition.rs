@@ -24,17 +24,17 @@ impl<'a> FatPartition<'a> {
         let boot_sector = &*(bs_bytes as *const [u8] as *const BootSector);
 
         let fat_table_range = boot_sector.get_fat_table_range();
-        let data_range = boot_sector.get_data_range();
 
         let relative_fat_table_start = fat_table_range.start - bs_bytes.len();
         let data_after_reserved_sectors = &mut data_after_boot_sector[relative_fat_table_start..];
         let (fat_table_bytes, data_after_fat_table) = data_after_reserved_sectors.split_at_mut(fat_table_range.len());
         let fat_table = fat_table_bytes.exact_align_to::<FatTableIndex>();
 
-        let relative_data_start = data_range.start - fat_table_range.end;
-        let data = &mut data_after_fat_table[relative_data_start..];
-
-        assert_eq!(data.len(), data_range.len(), "The partition size declared by FAT is inconsistent with the actual partition size.");
+        let mut data_range = boot_sector.get_data_range();
+        data_range.start -= fat_table_range.end;
+        data_range.end -= fat_table_range.end;
+        let relative_data_range = data_range;
+        let data = &mut data_after_fat_table[relative_data_range];
 
         Self { boot_sector, fat_table, data }
     }
