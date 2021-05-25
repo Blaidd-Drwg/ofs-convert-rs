@@ -1,7 +1,7 @@
 use crate::fat::BootSector;
 use std::convert::TryFrom;
 use std::io;
-use crate::lohi::LoHiMut;
+use crate::lohi::{LoHiMut, LoHi};
 use chrono;
 use num::Integer;
 use uuid::Uuid;
@@ -22,6 +22,7 @@ const EXT4_INODE_RATIO: u32 = 16384;
 const EXT4_INODE_SIZE: u16 = 256;
 // Simplified because we don't use clusters
 const EXT4_MAX_BLOCKS_PER_GROUP: u32 = (1 << 16) - 8;
+const MIN_GROUP_BLOCK_COUNT: u64 = 50; // the lowest number of data blocks a block group can have
 
 
 #[repr(C)]
@@ -123,54 +124,24 @@ pub struct SuperBlock {
 
 impl SuperBlock {
     pub fn new(boot_sector: &BootSector) -> io::Result<Self> {
-        // TODO bytes_per_* or *_size?
-        let bytes_per_block = boot_sector.cluster_size();
+        // SAFETY: This allows us to skip initializing a ton of fields to zero, but
+        // CAUTION: some initialization steps rely on other fields already having been set,
+        // so pay attention when refactoring/reoreding steps.
+        let mut sb: SuperBlock = unsafe { std::mem::zeroed() };
+
+        let block_size = boot_sector.cluster_size();
         // TODO document why
-        if bytes_per_block < 1024 {
+        if block_size < 1024 {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "This tool only works for FAT partitions with cluster size >= 1kB"));
         }
 
-        // SAFETY: safe as long as we set all fields needed for a consistent file system by hand
-        let mut sb: SuperBlock = unsafe { std::mem::zeroed() };
-
-        let log_block_size = f64::from(bytes_per_block).log2().round() as u32;
-        if 2u32.pow(log_block_size) != bytes_per_block {
+        let log_block_size = f64::from(block_size).log2().round() as u32;
+        if 2u32.pow(log_block_size) != block_size {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "FAT cluster size is not a power of 2"));
         }
         sb.s_log_block_size = log_block_size - EXT4_BLOCK_SIZE_MIN_LOG2;
-        sb.s_first_data_block = if bytes_per_block == 1024 { 1 } else { 0 };
-        sb.s_blocks_per_group = EXT4_MAX_BLOCKS_PER_GROUP.min(bytes_per_block * 8);
-        let block_count = boot_sector.partition_size() / u64::from(bytes_per_block);
-        LoHiMut::new(&mut sb.s_blocks_count_lo, &mut sb.s_blocks_count_hi).set(block_count);
-
-        // TODO what
-        // Same logic as used in mke2fs: If the last block group would have
-        // fewer than 50 data blocks, then reduce the block count and ignore the
-        // remaining space
-        // For some reason in tests we found that mkfs.ext4 didn't follow this logic
-        // and instead set sb.blocks_per_group to a value lower than
-        // bytes_per_block * 8, but this is easier to implement.
-        // We use the sparse_super2 logic from mke2fs, meaning that the last block
-        // group always has a super block copy.
-        // if block_count % sb.s_blocks_per_group < block_group_overhead(true) + 50 {
-            // LoHi64 { lo: &mut sb.s_blocks_count_lo, hi: &mut sb.s_blocks_count_hi }.set(block_count);
-        // }
-
-        // Same logic as in mke2fs
-        let block_group_count = block_count.div_ceil(&(u64::from(sb.s_blocks_per_group)));
-        let block_group_count = u32::try_from(block_group_count).unwrap(); // TODO
-
-        if block_group_count > 1 {
-            sb.s_backup_bgs[0] = 1;
-            if block_group_count > 2 {
-                sb.s_backup_bgs[1] = block_group_count - 1;
-            }
-        }
-
-        // This is the same logic as used by mke2fs to determine the inode count
-        let min_inodes_per_group = bytes_per_block * 8; // Inodes per group need to fit into a one page bitmap
-        sb.s_inodes_per_group = min_inodes_per_group.min(sb.s_blocks_per_group * bytes_per_block / EXT4_INODE_RATIO);
-        sb.s_inodes_count = sb.s_inodes_per_group * block_group_count;
+        sb.s_first_data_block = if block_size == 1024 { 1 } else { 0 };
+        sb.s_blocks_per_group = EXT4_MAX_BLOCKS_PER_GROUP.min(block_size * 8);
 
         sb.s_magic = EXT4_MAGIC;
         sb.s_state = EXT4_STATE_CLEANLY_UNMOUNTED;
@@ -191,6 +162,77 @@ impl SuperBlock {
         sb.s_log_cluster_size = sb.s_log_block_size;
         sb.s_clusters_per_group = sb.s_blocks_per_group;
 
+        // This is the same logic as used by mke2fs to determine the inode count
+        let min_inodes_per_group = block_size * 8; // Inodes per group need to fit into a one page bitmap
+        sb.s_inodes_per_group = min_inodes_per_group.min(sb.s_blocks_per_group * block_size / EXT4_INODE_RATIO);
+
+        // Same logic as used in mke2fs: If the last block group would have
+        // fewer than 50 data blocks, then reduce the block count and ignore the
+        // remaining space
+        // For some reason in tests we found that mkfs.ext4 didn't follow this logic
+        // and instead set sb.blocks_per_group to a value lower than
+        // `block_size` * 8, but this is easier to implement.
+        // We use the sparse_super2 logic from mke2fs, meaning that the last block
+        // group always has a super block copy.
+        // TODO can it happen that block_count becomes zero?
+        // TODO we would have to move data the falls outside of the bg into a bg, do we do that?
+        let mut block_count = boot_sector.partition_size() / u64::from(block_size);
+        // set the intermediate value in `sb` because it is needed by the call to `sb.block_group_overhead`.
+        LoHiMut::new(&mut sb.s_blocks_count_lo, &mut sb.s_blocks_count_hi).set(block_count);
+        let last_group_block_count = block_count % u64::from(sb.s_blocks_per_group);
+
+        // method call requires `s_reserved_gdt_blocks`, `s_log_block_size`, `s_desc_size`, `s_inodes_per_group`, `s_inode_size`, `s_blocks_per_group`, `s_blocks_count_hi` and `s_blocks_count_lo` to be already set
+        if last_group_block_count < sb.block_group_overhead(true) + MIN_GROUP_BLOCK_COUNT {
+            block_count -= last_group_block_count;
+            assert_ne!(block_count, 0);
+            LoHiMut::new(&mut sb.s_blocks_count_lo, &mut sb.s_blocks_count_hi).set(block_count);
+        }
+
+        // Same logic as in mke2fs
+        let block_group_count = block_count.div_ceil(&(u64::from(sb.s_blocks_per_group)));
+        let block_group_count = u32::try_from(block_group_count).unwrap(); // TODO
+        sb.s_inodes_count = sb.s_inodes_per_group * block_group_count;
+
+        if block_group_count > 1 {
+            sb.s_backup_bgs[0] = 1;
+            if block_group_count > 2 {
+                sb.s_backup_bgs[1] = block_group_count - 1;
+            }
+        }
         Ok(sb)
+    }
+
+    fn block_group_overhead(&self, has_sb_copy: bool) -> u64 {
+        let mut overhead = 2 + self.inode_table_block_count();
+        if has_sb_copy {
+            overhead += 1 + self.gdt_block_count() + u64::from(self.s_reserved_gdt_blocks);
+        }
+        overhead
+    }
+
+    fn gdt_block_count(&self) -> u64 {
+        // TODO
+        // block size;
+        // desc size;
+        // bg count;
+        // bg count * desc size = gdt size;
+        // / block = gdt block count
+
+        let descriptors_that_fit_into_a_block = self.block_size() / u64::from(self.s_desc_size);
+        self.block_group_count().div_ceil(&descriptors_that_fit_into_a_block)
+    }
+
+    fn inode_table_block_count(&self) -> u64 {
+        let inode_table_size = u64::from(self.s_inodes_per_group) * u64::from(self.s_inode_size);
+        inode_table_size.div_ceil(&self.block_size())
+    }
+
+    fn block_size(&self) -> u64 {
+        1 << (self.s_log_block_size + EXT4_BLOCK_SIZE_MIN_LOG2)
+    }
+
+    fn block_group_count(&self) -> u64 {
+        let block_count: u64 = LoHi::new(&self.s_blocks_count_lo, &self.s_blocks_count_hi).get();
+        block_count.div_ceil(&u64::from(self.s_blocks_per_group))
     }
 }
