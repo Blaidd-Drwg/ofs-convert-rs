@@ -1,7 +1,7 @@
 use crate::fat::{ClusterIdx, FatTableIndex, FatDentry};
 use std::ops::Range;
 
-pub type Extent = Range<FatTableIndex>;
+pub type Extent = Range<ClusterIdx>;
 
 pub struct FatFile {
     pub name: String,

@@ -2,7 +2,6 @@ use crate::fat::{BootSector, FatFile, FatDentry};
 use crate::ext4::SuperBlock;
 use crate::partition::Partition;
 use crate::fat::Extent;
-use std::os::raw::c_int;
 use std::convert::{TryInto, TryFrom};
 
 extern "C" {
@@ -103,13 +102,12 @@ fn to_c_extents(data_ranges: &[Extent]) -> Vec<CExtent> {
     let mut extent_start = 0;
     data_ranges.iter()
         .map(|range| {
-            let len = range.end.get() - range.start.get();
             let c_extent = CExtent {
                 logical_start: extent_start,
-                length: len.try_into().unwrap(),
-                physical_start: range.start.get(),
+                length: range.len().try_into().unwrap(),
+                physical_start: range.start,
             };
-            extent_start += u32::try_from(len).unwrap();
+            extent_start += u32::try_from(range.len()).unwrap();
             c_extent
         })
         .collect()

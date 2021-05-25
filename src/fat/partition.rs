@@ -102,16 +102,22 @@ impl<'a> FatPartition<'a> {
     }
 
     /// Given a file's first FAT index, follow the FAT chain and collect all of the file's FAT indices into a list of adjacent ranges.
-    pub fn data_ranges(&'a self, first_fat_idx: FatTableIndex) -> Vec<Range<FatTableIndex>> {
-        let mut current_range = first_fat_idx..first_fat_idx; // we don't use RangeInclusive because it does not allow mutating end
+    pub fn data_ranges(&'a self, first_fat_idx: FatTableIndex) -> Vec<Range<ClusterIdx>> {
+        if first_fat_idx.is_zero_length_file() {
+            return Vec::new();
+        }
+
+        let first_cluster_idx = first_fat_idx.to_cluster_idx(self.boot_sector());
+        let mut current_range = first_cluster_idx..first_cluster_idx; // we don't use RangeInclusive because it does not allow mutating end
         let mut ranges = Vec::new();
 
         for fat_idx in FatIdxIter::new(first_fat_idx, self.fat_table()) {
-            if fat_idx == current_range.end {
+            let cluster_idx = fat_idx.to_cluster_idx(self.boot_sector());
+            if cluster_idx == current_range.end {
                 current_range.end += 1;
             } else {
                 ranges.push(current_range);
-                current_range = fat_idx..fat_idx + 1;
+                current_range = cluster_idx..cluster_idx + 1;
             }
         }
         ranges.push(current_range);

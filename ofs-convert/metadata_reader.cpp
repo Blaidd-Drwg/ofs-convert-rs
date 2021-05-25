@@ -169,7 +169,13 @@ void add_file(
     memcpy(archive_dentry, &dentry, sizeof dentry);
     for(int i = 0; i < extent_count; i++) {
         // breaks visualizer
-        find_blocked_extent_fragments(0, false, write_stream, extents[i]);
+        // TODO temporary hack for compatibility: the extents in the stream contain the global cluster index, but the C code assumes it to be the FAT index.
+        // To fix this, subtract the first global cluster index of the first data cluster, and add the FAT start index.
+        uint32_t first_data_cluster = meta_info.sectors_before_data / boot_sector.sectors_per_cluster;
+        auto extent = extents[i];
+        extent.physical_start -= first_data_cluster;
+        extent.physical_start += FAT_START_INDEX;
+        find_blocked_extent_fragments(0, false, write_stream, extent);
     }
     cutStreamArchiver(write_stream);
 }
