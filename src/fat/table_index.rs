@@ -1,7 +1,7 @@
 use crate::fat::{DataClusterIdx, ClusterIdx, BootSector, ROOT_FAT_IDX};
 
-use std::ops::{Add, AddAssign};
-use std::convert::{TryFrom, TryInto};
+use std::ops::{Add, AddAssign, Index};
+use std::convert::TryFrom;
 
 /// An index identifying a FAT entry.
 #[derive(PartialEq, Eq, Copy, Clone, PartialOrd, Ord)]
@@ -23,10 +23,6 @@ impl AddAssign<u32> for FatTableIndex {
 impl FatTableIndex {
     pub const fn new(idx: u32) -> Self {
         Self(idx)
-    }
-
-    pub fn get(self) -> u32 {
-        self.0
     }
 
     pub fn to_data_cluster_idx(self) -> DataClusterIdx {
@@ -57,5 +53,18 @@ impl FatTableIndex {
         const FREE_CLUSTER: u32 = 0;
         const CLUSTER_ENTRY_MASK: u32 = 0x0FFFFFFF;
         self.0 & CLUSTER_ENTRY_MASK == FREE_CLUSTER
+    }
+}
+
+impl Index<FatTableIndex> for [FatTableIndex] {
+    type Output = FatTableIndex;
+    fn index(&self, idx: FatTableIndex) -> &Self::Output {
+        &self[idx.0 as usize]
+    }
+}
+
+impl From<FatTableIndex> for u32 {
+    fn from(idx: FatTableIndex) -> Self {
+        idx.0
     }
 }

@@ -169,7 +169,7 @@ impl<'a> Iterator for FatIdxIter<'a> {
             None
         } else {
             let result = self.current_fat_idx;
-            self.current_fat_idx = self.fat_table[result.get() as usize];
+            self.current_fat_idx = self.fat_table[result];
             Some(result)
         }
     }

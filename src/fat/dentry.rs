@@ -81,7 +81,7 @@ impl FatDentry {
         let mut instance = Self::default();
         // SAFETY: safe assuming self is aligned, since both fields are 2-aligned within self
         unsafe {
-            LoHiMut::new(&mut instance.first_fat_index_lo, &mut instance.first_fat_index_hi).set(ROOT_FAT_IDX.get());
+            LoHiMut::new(&mut instance.first_fat_index_lo, &mut instance.first_fat_index_hi).set(u32::from(ROOT_FAT_IDX));
         }
         instance
     }
