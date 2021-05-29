@@ -31,7 +31,7 @@ impl Partition {
         Ok(Self {mmap})
     }
 
-    pub fn size(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.mmap.len()
     }
 
@@ -41,6 +41,13 @@ impl Partition {
 
     pub fn as_mut_ptr(&mut self) -> *mut u8 {
         self.mmap.as_mut_ptr()
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        // SAFETY: TODO
+        unsafe {
+            slice::from_raw_parts(self.mmap.as_ptr(), self.mmap.len())
+        }
     }
 
     pub fn as_mut_slice(&mut self) -> &mut [u8] {
@@ -106,7 +113,7 @@ mod tests {
         tmp_file.as_file_mut().write(&[0;FILE_SIZE]).unwrap();
 
         let partition = Partition::open(tmp_file.path()).unwrap();
-        assert_eq!(partition.size(), FILE_SIZE);
+        assert_eq!(partition.len(), FILE_SIZE);
     }
 
     #[test]

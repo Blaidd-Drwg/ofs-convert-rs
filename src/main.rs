@@ -1,4 +1,7 @@
-#[allow(dead_code)]
+#![allow(dead_code)]
+
+mod stream_archiver;
+mod allocator;
 mod ranges;
 mod partition;
 mod fat;
@@ -9,7 +12,9 @@ mod c_wrapper;
 // mod allocator;
 
 use crate::partition::Partition;
-use crate::c_wrapper::{c_initialize, c_convert};
+use crate::stream_archiver::StreamArchiver;
+use crate::fat::FsTreeSerializer;
+use crate::allocator::Allocator;
 
 use std::env::args;
 use std::io;
@@ -41,17 +46,19 @@ fn print_help() {
 }
 
 // TODO handle root
+// TODO create allocator, forbid bghs
 fn ofs_convert(partition_path: &str) -> io::Result<()> {
     let mut partition = Partition::open(partition_path)?;
     unsafe {
         let fat_partition = fat::FatPartition::new(partition.as_mut_slice());
         let boot_sector = *fat_partition.boot_sector();
         let superblock = ext4::SuperBlock::new(&boot_sector)?;
-        let mut stream_archiver = c_initialize(&mut partition, superblock, boot_sector);
-        let mut read_stream = stream_archiver;
-        let mut fat_partition = fat::FatPartition::new(partition.as_mut_slice());
-        fat_partition.serialize_directory_tree(&mut stream_archiver);
-        c_convert(&mut partition, &mut read_stream);
+        let fat_partition = fat::FatPartition::new(partition.as_slice());
+        let mut allocator = Allocator::new(&partition, &fat_partition);
+        let stream_archiver = StreamArchiver::new(&mut allocator, superblock.block_size() as usize);
+        let mut serializer = FsTreeSerializer::new(stream_archiver);
+        serializer.serialize_directory_tree(&fat_partition);
+        // c_convert(&mut partition, &mut read_stream);
     }
     // traverse, save metadata, move conflicting data
     // write block group headers (breaks FAT)

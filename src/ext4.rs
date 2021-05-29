@@ -232,7 +232,7 @@ impl SuperBlock {
         inode_table_size.div_ceil(&self.block_size())
     }
 
-    fn block_size(&self) -> u64 {
+    pub fn block_size(&self) -> u64 {
         1 << (self.s_log_block_size + EXT4_BLOCK_SIZE_MIN_LOG2)
     }
 

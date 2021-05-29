@@ -1,6 +1,5 @@
-use crate::fat::{ROOT_FAT_IDX, BootSector, Cluster, FatTableIndex, ClusterIdx, FatFileIter, FatIdxIter, FatFile, FatDentry};
+use crate::fat::{BootSector, Cluster, FatTableIndex, ClusterIdx, FatFileIter, FatIdxIter, FatFile, DataClusterIdx};
 use crate::ranges::Ranges;
-use crate::c_wrapper::{c_serialize_directory, c_serialize_file, StreamArchiver};
 use crate::util::ExactAlign;
 use std::convert::TryFrom;
 use std::mem::size_of;
@@ -12,29 +11,37 @@ use std::ops::Range;
 pub struct FatPartition<'a> {
     boot_sector: &'a BootSector,
     fat_table: &'a [FatTableIndex],
-    data: &'a mut [u8],
+    data: &'a [u8],
 }
 
+// allocator functions here
+// instead of borrowing allocated page in archiver: tail is on the heap, when we need a new page,
+// write tail to allocated cluster, zero heap page
+// safety guarantee: only mut references to free clusters. only read non-free clusters.
+
+// two methods: data_cluster and free_data_cluster_mut (panics if not free)
+// allocator gives me an index, when I write page from archiver I recall the previous cluster by
+// its index and write the current cluster's index
 
 // TODO ensure even an inconsistent FAT partition won't ever cause undefined behavior, remove unsafe where possible
 impl<'a> FatPartition<'a> {
     /// SAFETY: Safety is only guaranteed if `partition_data` is a consistent FAT32 partition.
-    pub unsafe fn new(partition_data: &'a mut [u8]) -> Self {
-        let (bs_bytes, data_after_boot_sector) = partition_data.split_at_mut(size_of::<BootSector>());
+    pub unsafe fn new(partition_data: &'a [u8]) -> Self {
+        let (bs_bytes, data_after_boot_sector) = partition_data.split_at(size_of::<BootSector>());
         let boot_sector = &*(bs_bytes as *const [u8] as *const BootSector);
 
         let fat_table_range = boot_sector.get_fat_table_range();
 
         let relative_fat_table_start = fat_table_range.start - bs_bytes.len();
-        let data_after_reserved_sectors = &mut data_after_boot_sector[relative_fat_table_start..];
-        let (fat_table_bytes, data_after_fat_table) = data_after_reserved_sectors.split_at_mut(fat_table_range.len());
+        let data_after_reserved_sectors = &data_after_boot_sector[relative_fat_table_start..];
+        let (fat_table_bytes, data_after_fat_table) = data_after_reserved_sectors.split_at(fat_table_range.len());
         let fat_table = fat_table_bytes.exact_align_to::<FatTableIndex>();
 
         let mut data_range = boot_sector.get_data_range();
         data_range.start -= fat_table_range.end;
         data_range.end -= fat_table_range.end;
         let relative_data_range = data_range;
-        let data = &mut data_after_fat_table[relative_data_range];
+        let data = &data_after_fat_table[relative_data_range];
 
         Self { boot_sector, fat_table, data }
     }
@@ -46,35 +53,6 @@ impl<'a> FatPartition<'a> {
     // TODO all the int type conversions (from, try_from)
     // TODO error concept: return options of results?
 
-    pub fn serialize_directory_tree(&mut self, stream_archiver: *mut StreamArchiver) {
-        let root_file = FatFile {
-            name: "".to_string(),
-            lfn_entries: Vec::new(),
-            dentry: FatDentry::root_dentry(),
-            data_ranges: self.data_ranges(ROOT_FAT_IDX)
-        };
-        unsafe {
-            self.serialize_directory(root_file, stream_archiver);
-        }
-    }
-
-    unsafe fn serialize_directory(&self, file: FatFile, stream_archiver: *mut StreamArchiver) {
-        let child_count_ptr = c_serialize_directory(&file, stream_archiver);
-        let first_fat_idx = file.dentry.first_fat_index();
-        for file in self.dir_content_iter(first_fat_idx) {
-            *child_count_ptr += 1;
-            if file.dentry.is_dir() {
-                self.serialize_directory(file, stream_archiver);
-            } else {
-                self.serialize_file(file, stream_archiver);
-            }
-        }
-    }
-
-    fn serialize_file(&self, file: FatFile, stream_archiver: *mut StreamArchiver) {
-        c_serialize_file(&file, stream_archiver);
-    }
-
     pub fn fat_table(&self) -> &'a [FatTableIndex] {
         self.fat_table
     }
@@ -83,16 +61,17 @@ impl<'a> FatPartition<'a> {
         usize::from(self.boot_sector.sectors_per_cluster) * usize::from(self.boot_sector.bytes_per_sector)
     }
 
-    pub fn data_cluster(&self, fat_idx: FatTableIndex) -> &Cluster {
+    // TODO assert used
+    pub fn data_cluster(&self, data_cluster_idx: DataClusterIdx) -> &Cluster {
         let cluster_size = self.cluster_size();
-        let start_byte = usize::try_from(fat_idx.to_data_cluster_idx()).unwrap() * cluster_size;
+        let start_byte = usize::from(data_cluster_idx) * cluster_size;
         &self.data[start_byte..start_byte+cluster_size]
     }
 
-    pub fn data_cluster_mut(&mut self, fat_idx: FatTableIndex) -> &mut Cluster {
+    pub fn read_data_cluster(&self, data_cluster_idx: DataClusterIdx) -> Vec<u8> {
         let cluster_size = self.cluster_size();
-        let start_byte = usize::try_from(fat_idx.to_data_cluster_idx()).unwrap() * cluster_size;
-        &mut self.data[start_byte..start_byte+cluster_size]
+        let start_byte = usize::try_from(data_cluster_idx).unwrap() * cluster_size;
+        self.data[start_byte..start_byte+cluster_size].to_vec()
     }
 
     /// Given the index of a directory's first cluster, iterate over the directory's content.
@@ -123,12 +102,35 @@ impl<'a> FatPartition<'a> {
         ranges.push(current_range);
         ranges
     }
+
+    fn is_free(&self, fat_idx: FatTableIndex) -> bool {
+        self.fat_table()[fat_idx].is_free()
+    }
+
+    // TODO refactor!
+    /// Returns the occupied clusters in the partition
+    pub fn used_ranges(&self) -> Ranges<ClusterIdx> {
+        let mut ranges = Ranges::new();
+        let first_data_cluster_idx = self.boot_sector().get_data_range().start / self.cluster_size();
+        let non_data_range = 0..first_data_cluster_idx as u32;
+        ranges.insert(non_data_range);
+
+        // could be optimized
+        for (fat_idx, &content) in self.fat_table().iter().enumerate() {
+            if content.is_free() {
+                let range_start = FatTableIndex::try_from(fat_idx).unwrap().to_cluster_idx(self.boot_sector());
+                ranges.insert(range_start..range_start+1);
+            }
+        }
+        ranges
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::partition::Partition;
+    use crate::fat::ROOT_FAT_IDX;
     use std::collections::HashSet;
     use std::iter::FromIterator;
     use std::array::IntoIter;

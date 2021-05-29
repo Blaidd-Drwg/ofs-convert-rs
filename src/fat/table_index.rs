@@ -1,4 +1,4 @@
-use crate::fat::{DataClusterIdx, ClusterIdx, BootSector, ROOT_FAT_IDX};
+use crate::fat::{ClusterIdx, BootSector, ROOT_FAT_IDX};
 
 use std::ops::{Add, AddAssign, Index};
 use std::convert::TryFrom;
@@ -27,13 +27,13 @@ impl FatTableIndex {
 
     pub fn to_data_cluster_idx(self) -> DataClusterIdx {
         assert!(self.0 >= ROOT_FAT_IDX.0);
-        self.0 - ROOT_FAT_IDX.0
+        DataClusterIdx::new(self.0 - ROOT_FAT_IDX.0)
     }
 
     pub fn to_cluster_idx(self, boot_sector: &BootSector) -> ClusterIdx {
         let data_start_byte_idx = boot_sector.get_data_range().start;
         let data_start_cluster_idx = data_start_byte_idx / (usize::from(boot_sector.bytes_per_sector) * usize::from(boot_sector.sectors_per_cluster));
-        self.to_data_cluster_idx() + u32::try_from(data_start_cluster_idx).unwrap()
+        u32::from(self.to_data_cluster_idx()) + u32::try_from(data_start_cluster_idx).unwrap()
     }
 
     /// True if `self.0` is a special value representing the end of a FAT chain.
@@ -63,8 +63,45 @@ impl Index<FatTableIndex> for [FatTableIndex] {
     }
 }
 
+impl TryFrom<usize> for FatTableIndex {
+    type Error = std::num::TryFromIntError;
+    fn try_from(idx: usize) -> Result<Self, Self::Error> {
+        Ok(FatTableIndex(u32::try_from(idx)?))
+    }
+}
+
 impl From<FatTableIndex> for u32 {
     fn from(idx: FatTableIndex) -> Self {
         idx.0
+    }
+}
+
+
+/// An index identifying a cluster in the data section of the partition.
+#[derive(PartialEq, Eq, Copy, Clone, PartialOrd, Ord)]
+pub struct DataClusterIdx(u32);
+impl DataClusterIdx {
+    pub const fn new(idx: u32) -> Self {
+        Self(idx)
+    }
+
+    pub fn to_fat_index(self) -> FatTableIndex {
+        FatTableIndex::new(self.0 + ROOT_FAT_IDX.0)
+    }
+
+    pub fn to_ne_bytes(self) -> [u8; 4] {
+        self.0.to_ne_bytes()
+    }
+}
+
+impl From<DataClusterIdx> for u32 {
+    fn from(idx: DataClusterIdx) -> Self {
+        idx.0
+    }
+}
+
+impl From<DataClusterIdx> for usize {
+    fn from(idx: DataClusterIdx) -> Self {
+        idx.0 as usize
     }
 }

@@ -1,6 +1,5 @@
-use crate::fat::{FatPartition, FatPseudoDentry, FatTableIndex, ClusterIdx, FatFile};
+use crate::fat::{FatPartition, FatPseudoDentry, FatTableIndex, FatFile};
 use crate::util::ExactAlign;
-use std::convert::TryFrom;
 use std::iter::Peekable;
 use itertools::free::join;
 
@@ -124,7 +123,7 @@ impl<'a, I> FatPseudoDentryIter<'a, I> where I: Iterator<Item = FatTableIndex> {
 
     fn get_next_cluster(&mut self) {
         self.current_cluster = self.fat_idx_iter.next().map(|fat_idx| {
-            let cluster = self.partition.data_cluster(fat_idx);
+            let cluster = self.partition.data_cluster(fat_idx.to_data_cluster_idx());
             // SAFETY: safe, since directory data is a sequence of pseudo-dentries
             let dentries = unsafe { cluster.exact_align_to::<FatPseudoDentry>() };
             assert_eq!(dentries.len(), self.dentries_per_cluster);

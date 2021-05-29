@@ -62,11 +62,11 @@ pub struct StreamArchiver {
 }
 
 pub unsafe fn c_initialize(partition: &mut Partition, superblock: SuperBlock, boot_sector: BootSector) -> StreamArchiver {
-    initialize(CPartition{size: partition.size(), ptr: partition.as_mut_ptr()}, superblock, boot_sector)
+    initialize(CPartition{size: partition.len(), ptr: partition.as_mut_ptr()}, superblock, boot_sector)
 }
 
 pub unsafe fn c_convert(partition: &mut Partition, stream_archiver: *mut StreamArchiver) {
-    convert(CPartition{size: partition.size(), ptr: partition.as_mut_ptr()}, stream_archiver);
+    convert(CPartition{size: partition.len(), ptr: partition.as_mut_ptr()}, stream_archiver);
 }
 
 pub fn c_serialize_file(file: &FatFile, stream_archiver: *mut StreamArchiver) {
