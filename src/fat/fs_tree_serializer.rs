@@ -1,19 +1,15 @@
-use crate::fat::{FatDentry, FatPartition, FatFile, ROOT_FAT_IDX};
-use crate::stream_archiver::StreamArchiver;
+use crate::fat::{FatDentry, FatPartition, FatFile, ROOT_FAT_IDX, ClusterIdx};
+use crate::stream_archiver::{StreamArchiver, Reader};
 
 use chrono::prelude::*;
 use std::convert::{TryFrom, TryInto};
+use std::ops::Range;
 
 
 
 type Timestamp = u32;
 
-enum DirectoryCommand {
-    Enter,
-    Exit,
-    Continue,
-}
-
+#[derive(Clone, Copy)]
 enum FileType {
     Directory(u32), // contains child count
     RegularFile,
@@ -21,7 +17,6 @@ enum FileType {
 
 pub struct FsTreeSerializer<'a> {
     stream_archiver: StreamArchiver<'a>,
-    previous_action_was_enter_or_exit: bool,
 }
 
 /// A slimmed down representation of the relevant components of a FAT dentry for serialization
@@ -71,7 +66,7 @@ pub fn fat_time_to_unix_time(date: u16, time: Option<u16>) -> u32 {
 
 impl<'a> FsTreeSerializer<'a> {
     pub fn new(stream_archiver: StreamArchiver<'a>) -> Self {
-        Self { stream_archiver, previous_action_was_enter_or_exit: false }
+        Self { stream_archiver }
     }
 
     pub fn serialize_directory_tree(&mut self, partition: &FatPartition) {
@@ -90,7 +85,6 @@ impl<'a> FsTreeSerializer<'a> {
         let first_fat_idx = file.dentry.first_fat_index();
         let child_count = partition.dir_content_iter(first_fat_idx).count();
         self.archive_directory(file, child_count.try_into().unwrap());
-        self.enter_directory();
 
         for file in partition.dir_content_iter(first_fat_idx) {
             if file.dentry.is_dir() {
@@ -99,13 +93,9 @@ impl<'a> FsTreeSerializer<'a> {
                 self.archive_file(file);
             }
         }
-        self.exit_directory();
     }
 
     pub fn archive_file(&mut self, file: FatFile) {
-        if !self.previous_action_was_enter_or_exit {
-            self.stream_archiver.archive(vec![DirectoryCommand::Continue]);
-        }
         self.stream_archiver.archive(vec![file.dentry]);
         self.stream_archiver.archive(file.name.into_bytes());
         self.stream_archiver.archive(vec![FileType::RegularFile]);
@@ -113,19 +103,39 @@ impl<'a> FsTreeSerializer<'a> {
     }
 
     pub fn archive_directory(&mut self, file: FatFile, child_count: u32) {
-        if !self.previous_action_was_enter_or_exit {
-            self.stream_archiver.archive(vec![DirectoryCommand::Continue]);
-        }
         self.stream_archiver.archive(vec![file.dentry]);
         self.stream_archiver.archive(file.name.into_bytes());
         self.stream_archiver.archive(vec![FileType::Directory(child_count)]);
     }
 
-    pub fn enter_directory(&mut self) {
-        self.stream_archiver.archive(vec![DirectoryCommand::Enter]);
+    pub fn into_deserializer(self) -> FsTreeDeserializer<'a> {
+        FsTreeDeserializer { reader: self.stream_archiver.into_reader() }
+    }
+}
+
+pub struct FsTreeDeserializer<'a> {
+    reader: Reader<'a>,
+}
+
+impl<'a> FsTreeDeserializer<'a> {
+    pub fn deserialize_directory_tree(&mut self) {
+        self.deserialize_file();
     }
 
-    pub fn exit_directory(&mut self) {
-        self.stream_archiver.archive(vec![DirectoryCommand::Exit]);
+    pub fn deserialize_file(&mut self) {
+        unsafe {
+            let dentry = self.reader.next::<FatDentry>()[0];
+            let name = String::from_utf8(self.reader.next::<u8>()).unwrap();
+            let file_type = self.reader.next::<FileType>()[0];
+            match file_type {
+                FileType::Directory(child_count) => {
+                    for _ in 0..child_count {
+                        self.deserialize_file();
+                    }
+                },
+                FileType::RegularFile => { self.reader.next::<Range<ClusterIdx>>(); },
+            }
+            println!("{}", name);
+        }
     }
 }

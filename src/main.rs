@@ -58,6 +58,9 @@ fn ofs_convert(partition_path: &str) -> io::Result<()> {
         let stream_archiver = StreamArchiver::new(&mut allocator, superblock.block_size() as usize);
         let mut serializer = FsTreeSerializer::new(stream_archiver);
         serializer.serialize_directory_tree(&fat_partition);
+        let mut deserializer = serializer.into_deserializer();
+        let a = deserializer.deserialize_file();
+        let b = 1;
         // c_convert(&mut partition, &mut read_stream);
     }
     // traverse, save metadata, move conflicting data

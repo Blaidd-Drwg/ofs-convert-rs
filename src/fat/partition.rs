@@ -1,4 +1,4 @@
-use crate::fat::{BootSector, Cluster, FatTableIndex, ClusterIdx, FatFileIter, FatIdxIter, FatFile, DataClusterIdx};
+use crate::fat::{BootSector, Cluster, FatTableIndex, ClusterIdx, FatFileIter, FatIdxIter, FatFile, DataClusterIdx, ROOT_FAT_IDX};
 use crate::ranges::Ranges;
 use crate::util::ExactAlign;
 use std::convert::TryFrom;
@@ -116,8 +116,8 @@ impl<'a> FatPartition<'a> {
         ranges.insert(non_data_range);
 
         // could be optimized
-        for (fat_idx, &content) in self.fat_table().iter().enumerate() {
-            if content.is_free() {
+        for (fat_idx, &content) in self.fat_table().iter().enumerate().skip(u32::from(ROOT_FAT_IDX) as usize) {
+            if !content.is_free() {
                 let range_start = FatTableIndex::try_from(fat_idx).unwrap().to_cluster_idx(self.boot_sector());
                 ranges.insert(range_start..range_start+1);
             }
