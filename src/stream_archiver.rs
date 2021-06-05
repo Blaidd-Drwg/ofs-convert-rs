@@ -1,5 +1,6 @@
 use crate::allocator::{Allocator, AllocatedClusterIdx};
 use std::mem::size_of;
+use std::cell::Ref;
 
 type Page = [u8];
 type PageIdx = Option<AllocatedClusterIdx>;
@@ -11,7 +12,7 @@ pub struct StreamArchiver<'a> {
 	current_header: Header, // `current_header.len` encodes how many objects are still expected
 	page_size: usize,
 	position_in_tail_page: usize,
-	allocator: &'a mut Allocator<'a>,
+	allocator: &'a Allocator<'a>,
 }
 
 #[derive(Copy, Clone)]
@@ -26,7 +27,7 @@ struct Header {
 //    someone else took it and we're aliasing it.
 // 2)
 impl<'a> StreamArchiver<'a> {
-	pub fn new(allocator: &'a mut Allocator<'a>, page_size: usize) -> Self {
+	pub fn new(allocator: &'a Allocator<'a>, page_size: usize) -> Self {
 		const MIN_PAGE_PAYLOAD_SIZE: usize = 50;
 		assert!(page_size >= size_of::<PageIdx>() + MIN_PAGE_PAYLOAD_SIZE);
 
@@ -63,7 +64,7 @@ impl<'a> StreamArchiver<'a> {
 		} else { // if head is some, previous_page must be some
 			// set the previous page's next page index to the page we just wrote
 			let previous_page_idx = self.previous_page_idx.unwrap();
-			let previous_page = self.allocator.cluster_mut(previous_page_idx);
+			let mut previous_page = self.allocator.cluster_mut(previous_page_idx);
 			// SAFETY: TODO
 			unsafe {
 				std::ptr::write_unaligned(previous_page.as_mut_ptr() as *mut PageIdx, page_idx);
@@ -121,7 +122,7 @@ impl<'a> StreamArchiver<'a> {
 
 
 pub struct Reader<'a> {
-	current_page: &'a Page,
+	current_page: Ref<'a, Page>,
 	page_size: usize,
 	position_in_current_page: usize,
 	current_header: Header,
@@ -129,7 +130,7 @@ pub struct Reader<'a> {
 }
 
 impl<'a> Reader<'a> {
-	pub fn new(first_page_idx: PageIdx, page_size: usize, allocator: &'a Allocator) -> Self {
+	pub fn new(first_page_idx: PageIdx, page_size: usize, allocator: &'a Allocator<'a>) -> Self {
 		Self {
 			current_page: allocator.cluster(first_page_idx.expect("Reader initialized with empty StreamArchiver")),
 			page_size,

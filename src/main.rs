@@ -54,8 +54,8 @@ fn ofs_convert(partition_path: &str) -> io::Result<()> {
         let boot_sector = *fat_partition.boot_sector();
         let superblock = ext4::SuperBlock::new(&boot_sector)?;
         let fat_partition = fat::FatPartition::new(partition.as_slice());
-        let mut allocator = Allocator::new(&partition, &fat_partition);
-        let stream_archiver = StreamArchiver::new(&mut allocator, superblock.block_size() as usize);
+        let allocator = Allocator::new(&partition, &fat_partition);
+        let stream_archiver = StreamArchiver::new(&allocator, superblock.block_size() as usize);
         let mut serializer = FsTreeSerializer::new(stream_archiver);
         serializer.serialize_directory_tree(&fat_partition);
         let mut deserializer = serializer.into_deserializer();

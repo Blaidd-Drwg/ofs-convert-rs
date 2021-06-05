@@ -2,6 +2,8 @@ use crate::ranges::{Ranges, NotCoveredRange};
 use crate::fat::{ClusterIdx, FatPartition};
 use crate::partition::Partition;
 use std::ops::Range;
+use std::cell::{RefCell, Cell, Ref, RefMut};
+use std::ops::{DerefMut, Deref};
 use std::io;
 
 // TODO ensure DataClusterIdx can also not be constructed
@@ -19,9 +21,10 @@ impl From<AllocatedClusterIdx> for usize {
     }
 }
 
+// TODO modify to allow borrowing different clusters at the same time
 pub struct Allocator<'a> {
-    partition_data: &'a mut [u8],
-    cursor: ClusterIdx, // TODO document
+    partition_data: RefCell<&'a mut [u8]>,
+    cursor: Cell<ClusterIdx>, // TODO document
     used_ranges: Ranges<ClusterIdx>, // clusters used by FAT, overwriting will make FAT inconsistent
     forbidden_ranges: Ranges<ClusterIdx>, // clusters reserved for ext4 metadata
     cluster_size: usize,
@@ -53,8 +56,8 @@ impl<'a> Allocator<'a> {
         };
         let used_ranges = fat_partition.used_ranges();
         Self {
-            partition_data,
-            cursor: 0,
+            partition_data: RefCell::new(partition_data),
+            cursor: Cell::new(0),
             used_ranges,
             forbidden_ranges: Ranges::new(),
             cluster_size: fat_partition.cluster_size(),
@@ -67,28 +70,27 @@ impl<'a> Allocator<'a> {
 
     // returns a memory slice with 1 <= `slice.len()` <= `max_length`
     // TODO error handling
-    pub fn allocate(&mut self, max_length: usize) -> Range<AllocatedClusterIdx> {
-        let free_range = self.find_next_free_range().expect("Oh no, no more free blocks :(((");
+    pub fn allocate(&self, max_length: usize) -> Range<AllocatedClusterIdx> {
+        let free_range = self.find_next_free_range(self.cursor.get()).expect("Oh no, no more free blocks :(((");
         let range_end = free_range.end.min(free_range.start + max_length as u32);
-        self.cursor = range_end;
+        self.cursor.set(range_end);
         AllocatedClusterIdx(free_range.start)..AllocatedClusterIdx(range_end)
     }
 
-    pub fn cluster(&self, idx: AllocatedClusterIdx) -> &[u8] {
+    pub fn cluster(&'a self, idx: AllocatedClusterIdx) -> Ref<'a, [u8]> {
         let start_byte = self.cluster_size * usize::from(idx);
-        &self.partition_data[start_byte..start_byte+self.cluster_size]
+        Ref::map(self.partition_data.borrow(), |data| &data[start_byte..start_byte+self.cluster_size])
     }
 
-    pub fn cluster_mut(&mut self, idx: AllocatedClusterIdx) -> &mut [u8] {
+    pub fn cluster_mut(&'a self, idx: AllocatedClusterIdx) -> RefMut<'a, [u8]> {
         let start_byte = self.cluster_size * usize::from(idx);
-        &mut self.partition_data[start_byte..start_byte+self.cluster_size]
+        RefMut::map(self.partition_data.borrow_mut(), |data| &mut data[start_byte..start_byte+self.cluster_size])
     }
 
     /// Returns the next range at or after `self.cursor` that is neither used nor forbidden, or an
     /// Error if such a range does not exist.
-    fn find_next_free_range(&self) -> Result<Range<ClusterIdx>, io::Error> {
+    fn find_next_free_range(&self, mut cursor: u32) -> Result<Range<ClusterIdx>, io::Error> {
         let max_cluster_idx = 0; // TODO
-        let mut cursor = self.cursor;
         loop {
             let non_used_range = self.used_ranges.next_not_covered(cursor);
             let non_used_range = match non_used_range {
