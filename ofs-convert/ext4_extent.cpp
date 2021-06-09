@@ -4,7 +4,6 @@
 #include "ext4_extent.h"
 #include "ext4_inode.h"
 #include "fat.h"
-#include "stream-archiver.h"
 #include "util.h"
 #include "visualizer.h"
 

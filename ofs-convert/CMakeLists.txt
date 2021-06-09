@@ -19,16 +19,10 @@ add_library(ofs-convert STATIC
         ext4_inode.h
         extent-allocator.cpp
         extent-allocator.h
-        extent_iterator.cpp
-        extent_iterator.h
         fat.cpp
         fat.h
-        metadata_reader.cpp
-        metadata_reader.h
         ofs-convert.cpp
         partition.h
-        stream-archiver.cpp
-        stream-archiver.h
         tree_builder.cpp
         tree_builder.h
         util.cpp

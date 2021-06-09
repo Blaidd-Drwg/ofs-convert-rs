@@ -2,8 +2,6 @@
 #include "ext4.h"
 #include "ext4_extent.h"
 #include "ext4_dentry.h"
-#include "extent-allocator.h"
-#include "stream-archiver.h"
 #include "util.h"
 
 #include <string.h>

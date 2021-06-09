@@ -4,10 +4,8 @@
 #include "ext4_extent.h"
 #include "ext4_inode.h"
 #include "extent-allocator.h"
-#include "stream-archiver.h"
 #include "tree_builder.h"
 #include "visualizer.h"
-#include "extent_iterator.h"
 
 #include <bits/stdint-uintn.h>
 #include <string.h>
