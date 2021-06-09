@@ -45,7 +45,7 @@ struct ext4_inode {
     uint32_t    i_projid;    /* Project ID */
 };
 
-uint32_t build_inode(fat_dentry *dentry);
+uint32_t build_inode(const fat_dentry *dentry);
 void build_root_inode();
 void build_lost_found_inode();
 void set_size(uint32_t inode_number, uint64_t size);

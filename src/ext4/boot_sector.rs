@@ -1,8 +1,8 @@
-use crate::fat::BootSector;
+use crate::fat::{BootSector, ClusterIdx};
+use crate::lohi::{LoHiMut, LoHi};
 use std::convert::TryFrom;
 use std::io;
-use crate::lohi::{LoHiMut, LoHi};
-use chrono;
+use std::ops::Range;
 use num::Integer;
 use uuid::Uuid;
 
@@ -22,7 +22,9 @@ const EXT4_INODE_RATIO: u32 = 16384;
 const EXT4_INODE_SIZE: u16 = 256;
 // Simplified because we don't use clusters
 const EXT4_MAX_BLOCKS_PER_GROUP: u32 = (1 << 16) - 8;
+pub const GROUP_0_PADDING: u64 = 1024;
 const MIN_GROUP_BLOCK_COUNT: u64 = 50; // the lowest number of data blocks a block group can have
+const MIN_BLOCK_SIZE: usize = 1024;
 
 
 #[repr(C)]
@@ -123,8 +125,8 @@ pub struct SuperBlock {
 }
 
 impl SuperBlock {
-    pub fn new(boot_sector: &BootSector) -> io::Result<Self> {
-        if boot_sector.get_data_range().start % boot_sector.cluster_size() as usize != 0 {
+    pub fn from(boot_sector: &BootSector) -> io::Result<Self> {
+        if boot_sector.get_data_range().start % boot_sector.cluster_size() != 0 {
             // We want to treat FAT clusters as ext4 blocks, but we can't if they're not aligned
             return Err(io::Error::new(io::ErrorKind::InvalidData, "The FAT partition's must be aligned to its cluster size (for more info, see the -a option in the mkfs.fat man page)."));
         }
@@ -135,18 +137,18 @@ impl SuperBlock {
         let mut sb: SuperBlock = unsafe { std::mem::zeroed() };
 
         let block_size = boot_sector.cluster_size();
-        // TODO document why
-        if block_size < 1024 {
+        if block_size < MIN_BLOCK_SIZE {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "The FAT partition's cluster size must be >= 1kB"));
         }
 
-        let log_block_size = f64::from(block_size).log2().round() as u32;
-        if 2u32.pow(log_block_size) != block_size {
+        let log_block_size = (block_size as f64).log2().round() as u32;
+        if 2usize.pow(log_block_size) != block_size {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "FAT cluster size is not a power of 2"));
         }
         sb.s_log_block_size = log_block_size - EXT4_BLOCK_SIZE_MIN_LOG2;
-        sb.s_first_data_block = if block_size == 1024 { 1 } else { 0 };
-        sb.s_blocks_per_group = EXT4_MAX_BLOCKS_PER_GROUP.min(block_size * 8);
+        // check whether the entire first block is padding
+        sb.s_first_data_block = if block_size as u64 <= GROUP_0_PADDING { 1 } else { 0 };
+        sb.s_blocks_per_group = EXT4_MAX_BLOCKS_PER_GROUP.min(block_size as u32 * 8);
 
         sb.s_magic = EXT4_MAGIC;
         sb.s_state = EXT4_STATE_CLEANLY_UNMOUNTED;
@@ -168,8 +170,8 @@ impl SuperBlock {
         sb.s_clusters_per_group = sb.s_blocks_per_group;
 
         // This is the same logic as used by mke2fs to determine the inode count
-        let min_inodes_per_group = block_size * 8; // Inodes per group need to fit into a one page bitmap
-        sb.s_inodes_per_group = min_inodes_per_group.min(sb.s_blocks_per_group * block_size / EXT4_INODE_RATIO);
+        let min_inodes_per_group = block_size as u32 * 8; // Inodes per group need to fit into a one page bitmap
+        sb.s_inodes_per_group = min_inodes_per_group.min(sb.s_blocks_per_group * (block_size as u32) / EXT4_INODE_RATIO);
 
         // Same logic as used in mke2fs: If the last block group would have
         // fewer than 50 data blocks, then reduce the block count and ignore the
@@ -181,21 +183,23 @@ impl SuperBlock {
         // group always has a super block copy.
         // TODO can it happen that block_count becomes zero?
         // TODO we would have to move data the falls outside of the bg into a bg, do we do that?
-        let mut block_count = boot_sector.partition_size() / u64::from(block_size);
+        let mut block_count = boot_sector.partition_size() / u64::try_from(block_size).unwrap();
+        let mut data_block_count = block_count - sb.s_first_data_block as u64;
         // set the intermediate value in `sb` because it is needed by the call to `sb.block_group_overhead`.
         LoHiMut::new(&mut sb.s_blocks_count_lo, &mut sb.s_blocks_count_hi).set(block_count);
-        let last_group_block_count = block_count % u64::from(sb.s_blocks_per_group);
+        let last_group_block_count = data_block_count % u64::from(sb.s_blocks_per_group);
 
         // method call requires `s_reserved_gdt_blocks`, `s_log_block_size`, `s_desc_size`, `s_inodes_per_group`, `s_inode_size`, `s_blocks_per_group`, `s_blocks_count_hi` and `s_blocks_count_lo` to be already set
-        if last_group_block_count < sb.block_group_overhead(true) + MIN_GROUP_BLOCK_COUNT {
+        if last_group_block_count < sb.block_group_overhead(HasSuperBlock::YesBackup) + MIN_GROUP_BLOCK_COUNT {
             block_count -= last_group_block_count;
-            assert_ne!(block_count, 0);
+            data_block_count -= last_group_block_count;
+            assert_ne!(data_block_count, 0);
             LoHiMut::new(&mut sb.s_blocks_count_lo, &mut sb.s_blocks_count_hi).set(block_count);
         }
 
         // Same logic as in mke2fs
-        let block_group_count = block_count.div_ceil(&(u64::from(sb.s_blocks_per_group)));
-        let block_group_count = u32::try_from(block_group_count).unwrap(); // TODO
+        let block_group_count = data_block_count.div_ceil(&(u64::from(sb.s_blocks_per_group)));
+        let block_group_count = u32::try_from(block_group_count).unwrap();
         sb.s_inodes_count = sb.s_inodes_per_group * block_group_count;
 
         if block_group_count > 1 {
@@ -207,10 +211,21 @@ impl SuperBlock {
         Ok(sb)
     }
 
-    fn block_group_overhead(&self, has_sb_copy: bool) -> u64 {
+    // should I call bg has super from here instead?
+    fn block_group_overhead(&self, has_superblock: HasSuperBlock) -> u64 {
+        // block bitmap + inode bitmap + inode table
         let mut overhead = 2 + self.inode_table_block_count();
-        if has_sb_copy {
-            overhead += 1 + self.gdt_block_count() + u64::from(self.s_reserved_gdt_blocks);
+        match has_superblock {
+            HasSuperBlock::YesOriginal | HasSuperBlock::YesBackup => {
+                // superblock + group descriptor table
+                overhead += 1 + self.gdt_block_count() + u64::from(self.s_reserved_gdt_blocks);
+            },
+            HasSuperBlock::No => ()
+        }
+
+        if has_superblock == HasSuperBlock::YesOriginal && self.block_size() <= GROUP_0_PADDING {
+            // the entire first block is padding
+            overhead += 1;
         }
         overhead
     }
@@ -236,8 +251,40 @@ impl SuperBlock {
         1 << (self.s_log_block_size + EXT4_BLOCK_SIZE_MIN_LOG2)
     }
 
-    fn block_group_count(&self) -> u64 {
+    pub fn block_group_count(&self) -> u64 {
         let block_count: u64 = LoHi::new(&self.s_blocks_count_lo, &self.s_blocks_count_hi).get();
         block_count.div_ceil(&u64::from(self.s_blocks_per_group))
     }
+
+    pub fn block_group_has_superblock(&self, block_group_idx: usize) -> HasSuperBlock {
+        if block_group_idx == 0 {
+            HasSuperBlock::YesOriginal
+        } else if block_group_idx == self.s_backup_bgs[0] as usize || block_group_idx == self.s_backup_bgs[1] as usize {
+            HasSuperBlock::YesBackup
+        } else {
+            HasSuperBlock::No
+        }
+    }
+
+    // Caution: if the block size is 1024, every block group begins one block later than normal
+    pub fn block_group_start_cluster(&self, block_group_idx: usize) -> ClusterIdx {
+        self.s_blocks_per_group * block_group_idx as u32 + self.s_first_data_block
+    }
+
+    pub fn block_group_overhead_ranges(&self) -> Vec<Range<ClusterIdx>> {
+        (0..self.block_group_count() as usize).map(|block_group_idx| {
+            let has_sb_copy = self.block_group_has_superblock(block_group_idx);
+            let overhead = self.block_group_overhead(has_sb_copy);
+
+            let start_cluster_idx= self.block_group_start_cluster(block_group_idx);
+            start_cluster_idx..start_cluster_idx + u32::try_from(overhead).unwrap()
+        }).collect()
+    }
+}
+
+#[derive(PartialEq)]
+pub enum HasSuperBlock {
+    YesOriginal,
+    YesBackup,
+    No
 }

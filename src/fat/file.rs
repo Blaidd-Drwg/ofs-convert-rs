@@ -5,7 +5,6 @@ pub type Extent = Range<ClusterIdx>;
 
 pub struct FatFile {
     pub name: String,
-    pub lfn_entries: Vec<Vec<u16>>, // temporary addition for C compatibility
     pub dentry: FatDentry,
     pub data_ranges: Vec<Extent>,
 }

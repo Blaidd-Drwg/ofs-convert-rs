@@ -1,6 +1,8 @@
 use crate::fat::{BootSector, Cluster, FatTableIndex, ClusterIdx, FatFileIter, FatIdxIter, FatFile, DataClusterIdx, ROOT_FAT_IDX};
+use crate::allocator::Allocator;
 use crate::ranges::Ranges;
 use crate::util::ExactAlign;
+use crate::ext4::Ext4Partition;
 use std::convert::TryFrom;
 use std::mem::size_of;
 use std::ops::Range;
@@ -14,16 +16,6 @@ pub struct FatPartition<'a> {
     data: &'a [u8],
 }
 
-// allocator functions here
-// instead of borrowing allocated page in archiver: tail is on the heap, when we need a new page,
-// write tail to allocated cluster, zero heap page
-// safety guarantee: only mut references to free clusters. only read non-free clusters.
-
-// two methods: data_cluster and free_data_cluster_mut (panics if not free)
-// allocator gives me an index, when I write page from archiver I recall the previous cluster by
-// its index and write the current cluster's index
-
-// TODO ensure even an inconsistent FAT partition won't ever cause undefined behavior, remove unsafe where possible
 impl<'a> FatPartition<'a> {
     /// SAFETY: Safety is only guaranteed if `partition_data` is a consistent FAT32 partition.
     pub unsafe fn new(partition_data: &'a [u8]) -> Self {
@@ -46,19 +38,52 @@ impl<'a> FatPartition<'a> {
         Self { boot_sector, fat_table, data }
     }
 
+    pub unsafe fn new_with_allocator(partition_data: &'a mut [u8]) -> (Self, Allocator) {
+        // SAFETY: we want to borrow `partition_data` twice: immutably in FatPartition and mutably
+        // in Allocator. To avoid TODO, we divide the partition into used clusters (i.e. the
+        // reserved clusters, the FAT clusters, and the data clusters that contain data) and unused
+        // clusters (i.e. the data clusters that contain no data). FatPartition will only ever
+        // read used clusters. Allocator will only ever read and write unused clusters.
+        let partition_data_alias = unsafe {
+            std::slice::from_raw_parts(partition_data.as_ptr(), partition_data.len())
+        };
+        let instance = Self::new(partition_data_alias);
+        let allocator = Allocator::new(partition_data, instance.cluster_size(), instance.used_ranges());
+        (instance, allocator)
+    }
+
+    pub fn into_ext4(self) -> Ext4Partition<'a> {
+        let partition_data = unsafe {
+            let start_ptr = self.boot_sector as *const _ as *mut u8;
+            let end_ptr = self.data.last().unwrap() as *const u8;
+            let len = end_ptr.offset_from(start_ptr);
+            std::slice::from_raw_parts_mut(start_ptr, usize::try_from(len).unwrap())
+        };
+        Ext4Partition::from(partition_data, self.boot_sector)
+    }
+
     pub fn boot_sector(&self) -> &BootSector {
         self.boot_sector
     }
 
     // TODO all the int type conversions (from, try_from)
-    // TODO error concept: return options of results?
+    // TODO error concept: return options of results? error chain?
 
     pub fn fat_table(&self) -> &'a [FatTableIndex] {
         self.fat_table
     }
 
     pub fn cluster_size(&self) -> usize {
-        usize::from(self.boot_sector.sectors_per_cluster) * usize::from(self.boot_sector.bytes_per_sector)
+        self.boot_sector.cluster_size()
+    }
+
+    // TODO these conversions are a mess
+    pub fn cluster_idx_to_data_cluster_idx(&self, cluster_idx: ClusterIdx) -> Result<DataClusterIdx, &str> {
+        let data_cluster_idx = cluster_idx.checked_sub(self.boot_sector.first_data_cluster());
+        match data_cluster_idx {
+            Some(data_cluster_idx) => Ok(DataClusterIdx::new(data_cluster_idx)),
+            None => Err("cluster_idx is not a data cluster index")
+        }
     }
 
     // TODO assert used
@@ -107,17 +132,16 @@ impl<'a> FatPartition<'a> {
         self.fat_table()[fat_idx].is_free()
     }
 
-    // TODO refactor!
     /// Returns the occupied clusters in the partition
     pub fn used_ranges(&self) -> Ranges<ClusterIdx> {
         let mut ranges = Ranges::new();
-        let first_data_cluster_idx = self.boot_sector().get_data_range().start / self.cluster_size();
-        let non_data_range = 0..first_data_cluster_idx as u32;
+        let first_data_cluster_idx = self.boot_sector.first_data_cluster();
+        let non_data_range = 0..first_data_cluster_idx;
         ranges.insert(non_data_range);
 
-        // could be optimized
-        for (fat_idx, &content) in self.fat_table().iter().enumerate().skip(u32::from(ROOT_FAT_IDX) as usize) {
-            if !content.is_free() {
+        // could be optimized to build bigger ranges and call `ranges.insert` less often
+        for (fat_idx, &fat_cell) in self.fat_table().iter().enumerate().skip(u32::from(ROOT_FAT_IDX) as usize) {
+            if !fat_cell.is_free() {
                 let range_start = FatTableIndex::try_from(fat_idx).unwrap().to_cluster_idx(self.boot_sector());
                 ranges.insert(range_start..range_start+1);
             }

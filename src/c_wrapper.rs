@@ -1,108 +1,163 @@
-use crate::fat::{BootSector, FatFile, FatDentry};
+use crate::fat::{BootSector, FatDentry, ClusterIdx};
 use crate::ext4::SuperBlock;
-use crate::partition::Partition;
 use crate::fat::Extent;
 use std::convert::{TryInto, TryFrom};
+use std::ops::Range;
+use std::ffi::c_void;
 
-extern "C" {
-    #[link_name = "\u{1}_Z10initialize9Partition16ext4_super_block11boot_sector"]
-    pub fn initialize(
-        partition: CPartition,
-        _sb: SuperBlock,
-        _boot_sector: BootSector,
-    ) -> StreamArchiver;
+mod ffi {
+    use crate::fat::{BootSector, FatDentry};
+    use crate::ext4::SuperBlock;
+    use crate::c_wrapper::DentryWritePosition;
 
-    #[link_name = "\u{1}_Z7convert9PartitionP14StreamArchiver"]
-    pub fn convert(partition: CPartition, read_stream: *mut StreamArchiver);
+    pub type AllocatorData = *mut ::std::os::raw::c_void;
+    pub type AllocatorFunc = unsafe extern "C" fn(arg1: AllocatorData) -> u32;
 
-    #[link_name = "\u{1}_Z16add_regular_fileP14StreamArchiver10fat_dentryPKPKtmPK10fat_extentm"]
-    pub fn add_regular_file(
-        write_stream: *mut StreamArchiver,
-        dentry: FatDentry,
-        lfn_entries: *const *const u16,
-        lfn_entry_count: usize,
-        extents: *const CExtent,
-        extent_count: usize,
-    );
+    extern "C" {
+        #[link_name = "\u{1}_Z10initializePh16ext4_super_block11boot_sector"]
+        pub fn initialize(fs_start: *mut u8, _sb: SuperBlock, _boot_sector: BootSector);
 
-    #[link_name = "\u{1}_Z7add_dirP14StreamArchiver10fat_dentryPKPKtmPK10fat_extentm"]
-    pub fn add_dir(
-        write_stream: *mut StreamArchiver,
-        dentry: FatDentry,
-        lfn_entries: *const *const u16,
-        lfn_entry_count: usize,
-        extents: *const CExtent,
-        extent_count: usize,
-    ) -> *mut u32;
-}
+        #[link_name = "\u{1}_Z13start_writingPFjPvES_"]
+        pub fn start_writing(
+            allocate_block_callback: AllocatorFunc,
+            allocator_data: AllocatorData,
+        ) -> DentryWritePosition;
 
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct CPartition {
-    pub size: usize,
-    pub ptr: *mut u8,
-}
+        #[link_name = "\u{1}_Z11end_writing19DentryWritePositionPFjPvES0_"]
+        pub fn end_writing(dentry_write_position: DentryWritePosition, allocate_block_callback: AllocatorFunc, allocator_data: AllocatorData);
 
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct CExtent {
-    pub logical_start: u32,  // First file cluster number that this extent covers
-    pub length: u16,  // Number of clusters covered by extent
-    pub physical_start: u32,  // Physical cluster number to which this extent points
-}
-
-/// We only temporarily store this as the result of a C function to then pass it to another C function.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct StreamArchiver {
-    page_placeholder: *mut u8,
-    offset_in_page: u64,
-    element_index: u64,
-    header_placeholder: *mut u8,
-}
-
-pub unsafe fn c_initialize(partition: &mut Partition, superblock: SuperBlock, boot_sector: BootSector) -> StreamArchiver {
-    initialize(CPartition{size: partition.len(), ptr: partition.as_mut_ptr()}, superblock, boot_sector)
-}
-
-pub unsafe fn c_convert(partition: &mut Partition, stream_archiver: *mut StreamArchiver) {
-    convert(CPartition{size: partition.len(), ptr: partition.as_mut_ptr()}, stream_archiver);
-}
-
-pub fn c_serialize_file(file: &FatFile, stream_archiver: *mut StreamArchiver) {
-    let c_extents = to_c_extents(&file.data_ranges);
-    unsafe {
-        add_regular_file(
-            stream_archiver,
-            file.dentry,
-            file.lfn_entries.iter().map(|entry| entry.as_ptr()).collect::<Vec<_>>().as_ptr(),
-            file.lfn_entries.len(),
-            c_extents.as_ptr(),
-            c_extents.len()
+        #[link_name = "\u{1}_Z18build_regular_filePK10fat_dentryPKhmR19DentryWritePositionPFjPvES6_PK10fat_extentm"]
+        pub fn build_regular_file(
+            f_dentry: *const FatDentry,
+            name: *const u8,
+            name_len: usize,
+            dentry_write_position: *mut DentryWritePosition,
+            allocate_block_callback: AllocatorFunc,
+            allocator_data: AllocatorData,
+            extents: *const Extent,
+            extent_count: usize,
         );
+
+        #[link_name = "\u{1}_Z15build_directoryPK10fat_dentryPKhmR19DentryWritePositionPFjPvES6_"]
+        pub fn build_directory(
+            f_dentry: *const FatDentry,
+            name: *const u8,
+            name_len: usize,
+            parent_dentry_write_position: *mut DentryWritePosition,
+            allocate_block_callback: AllocatorFunc,
+            allocator_data: AllocatorData,
+        ) -> DentryWritePosition;
+
+        #[link_name = "\u{1}_Z12finalize_dirR19DentryWritePosition"]
+        pub fn finalize_dir(dentry_write_position: *mut DentryWritePosition);
+    }
+
+    #[repr(C)]
+    #[derive(Debug, Copy, Clone)]
+    pub struct Partition {
+        pub size: usize,
+        pub ptr: *const u8,
+    }
+
+    #[repr(C)]
+    #[derive(Debug, Copy, Clone)]
+    pub struct Extent {
+        pub logical_start: u32,  // First file cluster number that this extent covers
+        pub length: u16,  // Number of clusters covered by extent
+        pub physical_start: u32,  // Physical cluster number to which this extent points
     }
 }
 
-pub fn c_serialize_directory(file: &FatFile, stream_archiver: *mut StreamArchiver) -> *mut u32 {
-    let c_extents = to_c_extents(&file.data_ranges);
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct DentryWritePosition {
+    pub inode_no: u32,
+    pub block_no: u32,
+    pub position_in_block: u32,
+    pub block_count: u32,
+    pub previous_dentry: *mut u8,
+}
+
+pub unsafe fn c_initialize(partition_ptr: *mut u8, superblock: SuperBlock, boot_sector: BootSector) {
+    ffi::initialize(partition_ptr, superblock, boot_sector);
+}
+
+pub unsafe fn c_start_writing<F>(allocate_block_callback: &mut F) -> DentryWritePosition where F: FnMut() -> u32 {
+    let (allocator_callback, allocator_data) = wrap_allocator_callback(allocate_block_callback);
+    ffi::start_writing(allocator_callback, allocator_data)
+    // DentryWritePosition { inode_no: 2, block_no: 0, position_in_block: 0, block_count: 0, previous_dentry: std::ptr::null_mut() }
+}
+
+pub unsafe fn c_end_writing<F>(dentry_write_position: DentryWritePosition, allocate_block_callback: &mut F) where F: FnMut() -> u32 {
+    let (allocator_callback, allocator_data) = wrap_allocator_callback(allocate_block_callback);
+    ffi::end_writing(dentry_write_position, allocator_callback, allocator_data);
+}
+
+fn wrap_allocator_callback<F>(allocator_callback: &mut F) -> (ffi::AllocatorFunc, ffi::AllocatorData) where F: FnMut() -> u32 {
+    extern "C" fn callback_wrapper<F>(closure_ptr: *mut c_void) -> u32 where F: FnMut() -> u32 {
+        let closure = closure_ptr as *mut F;
+        unsafe {
+             (*closure)()
+        }
+    }
+    let allocator_data = allocator_callback as *mut _ as ffi::AllocatorData;
+    (callback_wrapper::<F>, allocator_data)
+}
+
+pub fn c_build_regular_file<F>(
+    dentry: FatDentry,
+    name: String,
+    extents: Vec<Range<ClusterIdx>>,
+    parent_dentry_write_position: &mut DentryWritePosition,
+    allocate_block_callback: &mut F
+) where F: FnMut() -> u32 {
+    let c_extents = to_c_extents(&extents);
+    let (allocator_callback, allocator_data) = wrap_allocator_callback(allocate_block_callback);
     unsafe {
-        add_dir(
-            stream_archiver,
-            file.dentry,
-            file.lfn_entries.iter().map(|entry| entry.as_ptr()).collect::<Vec<_>>().as_ptr(),
-            file.lfn_entries.len(),
+        ffi::build_regular_file(
+            &dentry as *const FatDentry,
+            name.as_ptr(),
+            name.len(),
+            parent_dentry_write_position as *mut DentryWritePosition,
+            allocator_callback,
+            allocator_data,
             c_extents.as_ptr(),
-            c_extents.len()
+            c_extents.len(),
         )
     }
 }
 
+pub fn c_build_directory<F>(
+    dentry: FatDentry,
+    name: String,
+    parent_dentry_write_position: &mut DentryWritePosition,
+    allocate_block_callback: &mut F
+) -> DentryWritePosition where F: FnMut() -> u32 {
+    let (allocator_callback, allocator_data) = wrap_allocator_callback(allocate_block_callback);
+    unsafe {
+        ffi::build_directory(
+            &dentry as *const FatDentry,
+            name.as_ptr(),
+            name.len(),
+            parent_dentry_write_position as *mut DentryWritePosition,
+            allocator_callback,
+            allocator_data,
+        )
+    }
+}
+
+pub fn c_finalize_directory(dentry_write_position: &mut DentryWritePosition) {
+    unsafe {
+        ffi::finalize_dir(dentry_write_position)
+    }
+}
+
 // TODO type conversions
-fn to_c_extents(data_ranges: &[Extent]) -> Vec<CExtent> {
+fn to_c_extents(data_ranges: &[Extent]) -> Vec<ffi::Extent> {
     let mut extent_start = 0;
     data_ranges.iter()
         .map(|range| {
-            let c_extent = CExtent {
+            let c_extent = ffi::Extent {
                 logical_start: extent_start,
                 length: range.len().try_into().unwrap(),
                 physical_start: range.start,

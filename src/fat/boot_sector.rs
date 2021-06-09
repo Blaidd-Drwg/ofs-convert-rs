@@ -1,4 +1,4 @@
-use crate::fat::FatDentry;
+use crate::fat::{FatDentry, ClusterIdx};
 use std::ops::Range;
 use std::convert::TryFrom;
 
@@ -44,10 +44,17 @@ impl BootSector {
 
     /// Returns the range in bytes of the data region, relative to the partition start
     pub fn get_data_range(&self) -> Range<usize> {
-        let sectors_before_data = usize::from(self.sectors_before_fat) + (usize::try_from(self.sectors_per_fat).unwrap() * usize::from(self.fat_count));
-        let bytes_before_data = sectors_before_data * usize::from(self.bytes_per_sector);
+        let first_data_byte = self.first_data_sector() as usize * usize::from(self.bytes_per_sector);
         let partition_size = usize::from(self.bytes_per_sector) * usize::try_from(self.sector_count()).unwrap();
-        bytes_before_data .. partition_size
+        first_data_byte .. partition_size
+    }
+
+    fn first_data_sector(&self) -> u32 {
+        u32::from(self.sectors_before_fat) + (self.sectors_per_fat * u32::from(self.fat_count))
+    }
+
+    pub fn first_data_cluster(&self) -> ClusterIdx {
+        self.first_data_sector() / ClusterIdx::from(self.sectors_per_cluster)
     }
 
     pub fn sector_count(&self) -> u32 {
@@ -64,12 +71,12 @@ impl BootSector {
     }
 
     /// in bytes
-    pub fn cluster_size(&self) -> u32 {
-        u32::from(self.bytes_per_sector) * u32::from(self.sectors_per_cluster)
+    pub fn cluster_size(&self) -> usize {
+        usize::from(self.sectors_per_cluster) * usize::from(self.bytes_per_sector)
     }
 
     pub fn dentries_per_cluster(&self) -> usize {
-        usize::try_from(self.cluster_size()).unwrap() / std::mem::size_of::<FatDentry>()
+        self.cluster_size() / std::mem::size_of::<FatDentry>()
     }
 
     pub fn volume_label(&self) -> &[u8] {
@@ -88,5 +95,3 @@ impl BootSector {
         }
     }
 }
-// impl drop for testign
-

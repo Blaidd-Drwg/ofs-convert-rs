@@ -1,6 +1,7 @@
 #ifndef OFS_EXT4_DENTRY_H
 #define OFS_EXT4_DENTRY_H
 #include <stdint.h>
+#include <unistd.h>
 
 struct StreamArchiver;
 
@@ -14,7 +15,7 @@ struct ext4_dentry {
     uint8_t  name[EXT4_NAME_LEN];    /* File name */
 };
 
-ext4_dentry *build_dentry(uint32_t inode_number, StreamArchiver *read_stream);
+ext4_dentry *build_dentry(uint32_t inode_number, const uint8_t name[], size_t name_len);
 ext4_dentry build_dot_dir_dentry(uint32_t dir_inode_number);
 ext4_dentry build_dot_dot_dir_dentry(uint32_t parent_inode_number);
 ext4_dentry build_lost_found_dentry();

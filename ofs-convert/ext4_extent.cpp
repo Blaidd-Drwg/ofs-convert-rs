@@ -19,11 +19,11 @@ ext4_extent_header init_extent_header() {
     return header;
 }
 
-ext4_extent to_ext4_extent(fat_extent *fext) {
+ext4_extent to_ext4_extent(const fat_extent *fext) {
     ext4_extent eext;
     eext.ee_block = fext->logical_start;
     eext.ee_len = fext->length;
-    set_lo_hi(eext.ee_start_lo, eext.ee_start_hi, fat_cl_to_e4blk(fext->physical_start));
+    set_lo_hi(eext.ee_start_lo, eext.ee_start_hi, fext->physical_start);
     return eext;
 }
 
@@ -120,14 +120,14 @@ void add_extent(ext4_extent *eext, uint32_t inode_no, ext4_inode *inode) {
     }
 }
 
-void register_extent(fat_extent *fext, uint32_t inode_no, bool add_to_extent_tree) {
+void register_extent(const fat_extent *fext, uint32_t inode_no, bool add_to_extent_tree) {
     ext4_inode *inode = &get_existing_inode(inode_no);
     ext4_extent eext = to_ext4_extent(fext);
 
     if (add_to_extent_tree) {
         add_extent(&eext, inode_no, inode);
     } else {
-        visualizer_add_block_range({BlockRange::IdxNode, from_lo_hi(eext.ee_start_lo, eext.ee_start_hi), eext.ee_len});
+//        visualizer_add_block_range({BlockRange::IdxNode, from_lo_hi(eext.ee_start_lo, eext.ee_start_hi), eext.ee_len});
     }
 
     uint32_t block_count = static_cast<uint32_t>(eext.ee_len) * block_size() / 512;  // number of 512-byte blocks allocated
@@ -137,12 +137,10 @@ void register_extent(fat_extent *fext, uint32_t inode_no, bool add_to_extent_tre
     add_extent_to_block_bitmap(extent_start_block, extent_start_block + eext.ee_len);
 }
 
-void set_extents(uint32_t inode_number, fat_dentry *dentry, StreamArchiver *read_stream) {
+void set_extents(uint32_t inode_number, const fat_dentry *dentry, const fat_extent extents[], size_t extent_count) {
     set_size(inode_number, dentry->file_size);
-    fat_extent *current_extent = getNext<fat_extent>(read_stream);
-    while (current_extent != NULL) {
-        register_extent(current_extent, inode_number);
-        current_extent = getNext<fat_extent>(read_stream);
+    for (int i = 0; i < extent_count; i++) {
+        register_extent(&extents[i], inode_number);
     }
 }
 

@@ -1,5 +1,5 @@
-use crate::lohi::{LoHi, LoHiMut};
-use crate::fat::{ROOT_FAT_IDX, FatTableIndex};
+use crate::lohi::LoHi;
+use crate::fat::FatTableIndex;
 
 #[repr(C)]
 pub union FatPseudoDentry {
@@ -53,7 +53,7 @@ impl FatPseudoDentry {
     }
 }
 
-#[repr(C, packed)]
+#[repr(C)] // technically packed but it already has no padding by default
 #[derive(Debug, Copy, Clone, PartialEq, Default)]
 pub struct FatDentry {
     pub short_name: [u8; 8],
@@ -74,24 +74,8 @@ pub struct FatDentry {
 impl FatDentry {
     const DIR_FLAG: u8 = 0x10;
 
-    // TODO just return default once we don't need to read the cluster from here
-    pub fn root_dentry() -> Self {
-        // temporary solution for compatibility with ofs-convert, no value from the root
-        // dentry is actually read
-        let mut instance = Self::default();
-        // SAFETY: safe assuming self is aligned, since both fields are 2-aligned within self
-        unsafe {
-            LoHiMut::new(&mut instance.first_fat_index_lo, &mut instance.first_fat_index_hi).set(u32::from(ROOT_FAT_IDX));
-        }
-        instance
-    }
-
-    // TODO refactor to need an unsafe function to create
     pub fn first_fat_index(&self) -> FatTableIndex {
-        // SAFETY: safe assuming self is aligned, since both fields are 2-aligned within self
-        let idx = unsafe {
-            LoHi::new(&self.first_fat_index_lo, &self.first_fat_index_hi).get()
-        };
+        let idx = LoHi::new(&self.first_fat_index_lo, &self.first_fat_index_hi).get();
         FatTableIndex::new(idx)
     }
 
@@ -160,7 +144,7 @@ impl LongFileName {
     }
 
     // TODO handle Errors
-    pub fn to_utf8_string(&self) -> String {
+    pub fn to_utf8_string(self) -> String {
         std::char::decode_utf16(self.to_utf16_string()).map(|utf16_char| utf16_char.unwrap()).collect()
     }
 
@@ -168,16 +152,11 @@ impl LongFileName {
     // actually uses UTF-16. UTF-16 is backwards compatible with UCS-2 and can encode a superset
     // of the characters encodable with UCS-2, so to support files written by Linux that contain
     // these characters, we treat the file names as UTF-16.
-    pub fn to_utf16_string(&self) -> Vec<u16> {
-        // copy since name_1 and name_2 are unaligned, so borrowing them is undefined behavior
-        let name_1 = self.name_1;
-        let name_2 = self.name_2;
-        let name_3 = self.name_3;
-
+    pub fn to_utf16_string(self) -> Vec<u16> {
         let mut ucs_string = Vec::new();
-        ucs_string.extend_from_slice(&name_1);
-        ucs_string.extend_from_slice(&name_2);
-        ucs_string.extend_from_slice(&name_3);
+        ucs_string.extend(self.name_1);
+        ucs_string.extend(self.name_2);
+        ucs_string.extend(self.name_3);
 
         ucs_string.into_iter().take_while(|&character| character != 0x0000).collect()
     }

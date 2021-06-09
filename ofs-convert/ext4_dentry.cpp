@@ -42,23 +42,13 @@ int ucs2toutf8(uint8_t *dest, uint8_t *dest_end, uint16_t *src, int src_size) {
     return pos - dest;
 }
 
-struct ext4_dentry *build_dentry(uint32_t inode_number, StreamArchiver *read_stream) {
+// TODO check for EXT4_NAME_LIMIT
+struct ext4_dentry *build_dentry(uint32_t inode_number, const uint8_t name[], size_t name_len) {
     ext4_dentry *ext_dentry = (ext4_dentry *) malloc(sizeof *ext_dentry);
     ext_dentry->inode = inode_number;
-    ext_dentry->name_len = 0;
-
-    uint8_t *ext_name = ext_dentry->name;
-    uint8_t *ext_name_limit = ext_name + EXT4_NAME_LEN - 1;
-    uint16_t *segment = (uint16_t *) iterateStreamArchiver(read_stream, false,
-                                                           LFN_ENTRY_LENGTH * sizeof *segment);
-    while (segment != NULL) {
-        int bytes_written = ucs2toutf8(ext_name + ext_dentry->name_len, ext_name_limit,
-                                       segment, LFN_ENTRY_LENGTH);
-        ext_dentry->name_len += bytes_written;
-        segment = (uint16_t *) iterateStreamArchiver(read_stream, false,
-                                                     LFN_ENTRY_LENGTH * sizeof *segment);
-    }
-    ext_dentry->name[ext_dentry->name_len] = '\0';
+    memcpy(&ext_dentry->name, name, name_len);
+    ext_dentry->name[name_len] = 0;
+    ext_dentry->name_len = name_len; // terminating null byte isn't counted
     ext_dentry->rec_len = next_multiple_of_four(ext_dentry->name_len + 8);
     return ext_dentry;
 }

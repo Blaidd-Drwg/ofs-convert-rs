@@ -1,19 +1,33 @@
 use std::ops::Range;
+use std::iter::IntoIterator;
 
 
-// a set of non-overlapping ranges
+/// A set of non-overlapping ranges
+#[derive(Clone, Debug, Default)]
 pub struct Ranges<Idx: Ord + Copy> {
-    ranges: Vec<Range<Idx>>, // invariant: non-overlapping, sorted
+    /// invariant: non-overlapping, sorted
+    ranges: Vec<Range<Idx>>,
 }
 
+#[derive(PartialEq, Debug)]
 pub enum NotCoveredRange<T> {
-    Bounded(Range<T>), // a range with bounded start and end
-    Unbounded(T), // a range with a bounded start and unbounded end
+    /// a range with bounded start and end
+    Bounded(Range<T>),
+    /// a range with a bounded start and unbounded end
+    Unbounded(T),
 }
 
 impl<Idx: Ord + Copy> Ranges<Idx> {
     pub fn new() -> Self {
         Self { ranges: Vec::new() }
+    }
+
+    pub fn from(ranges: impl IntoIterator<Item = Range<Idx>>) -> Self {
+        let mut instance = Self::new();
+        for range in ranges {
+            instance.insert(range);
+        }
+        instance
     }
 
     /// Inserts `range` into `self.ranges` in the correct position and merging it with other ranges
@@ -51,7 +65,6 @@ impl<Idx: Ord + Copy> Ranges<Idx> {
 
     /// Returns the first range of non-covered items starting at or after `x`, whose end can either
     /// be bounded or unbounded.
-    // what if there is no candidate?
     pub fn next_not_covered(&self, x: Idx) -> NotCoveredRange<Idx> {
         let overlap_candidate_idx = self.first_overlap_candidate(&(x..x));
         if overlap_candidate_idx == self.ranges.len() {
@@ -66,7 +79,6 @@ impl<Idx: Ord + Copy> Ranges<Idx> {
         }
     }
 
-    // TODO test
     /// Splits up a range into a Vec of subranges and a bool. Either every element in a subrange is contained in a range from `self.ranges` and the bool is true, or no element in a subrange is contained in such a range and the bool is false.
     pub fn split_overlapping(&self, range: Range<Idx>) -> Vec<(Range<Idx>, bool)> {
         let mut remaining_range = range;
@@ -114,6 +126,13 @@ impl<Idx: Ord + Copy> Ranges<Idx> {
     }
 }
 
+impl<'a, Idx: Ord+Copy> IntoIterator for &'a Ranges<Idx> {
+    type Item = &'a Range<Idx>;
+    type IntoIter = std::slice::Iter<'a, Range<Idx>>;
+    fn into_iter(self) -> Self::IntoIter {
+        (&self.ranges).iter()
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -166,5 +185,47 @@ mod tests {
         let mut ranges = Ranges { ranges: vec![0..2, 6..9, 11..14] };
         ranges.insert(9..11);
         assert_eq!(ranges.ranges, vec![0..2, 6..14]);
+    }
+
+    #[test]
+    fn not_covered_start() {
+        let mut ranges = Ranges { ranges: vec![0..2, 6..9, 11..14] };
+        assert_eq!(ranges.next_not_covered(2), NotCoveredRange::Bounded(2..6));
+    }
+
+    #[test]
+    fn not_covered_middle() {
+        let mut ranges = Ranges { ranges: vec![0..2, 6..9, 11..14] };
+        assert_eq!(ranges.next_not_covered(4), NotCoveredRange::Bounded(4..6));
+    }
+
+    #[test]
+    fn not_covered_covered() {
+        let mut ranges = Ranges { ranges: vec![0..2, 6..9, 11..14] };
+        assert_eq!(ranges.next_not_covered(0), NotCoveredRange::Bounded(2..6));
+    }
+
+    #[test]
+    fn not_covered_unbounded() {
+        let mut ranges = Ranges { ranges: vec![0..2, 6..9, 11..14] };
+        assert_eq!(ranges.next_not_covered(12), NotCoveredRange::Unbounded(14));
+    }
+
+    #[test]
+    fn not_covered_when_empty() {
+        let mut ranges = Ranges { ranges: Vec::new() };
+        assert_eq!(ranges.next_not_covered(5), NotCoveredRange::Unbounded(5));
+    }
+
+    #[test]
+    fn split_overlapping_short() {
+        let mut ranges = Ranges { ranges: vec![0..2, 6..9, 11..14] };
+        assert_eq!(ranges.split_overlapping(5..7), vec![(5..6, false), (6..7, true)]);
+    }
+
+    #[test]
+    fn split_overlapping_long() {
+        let mut ranges = Ranges { ranges: vec![0..2, 6..9, 11..14] };
+        assert_eq!(ranges.split_overlapping(0..19), vec![(0..2, true), (2..6, false), (6..9, true), (9..11, false), (11..14, true), (14..19, false)]);
     }
 }

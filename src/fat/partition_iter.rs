@@ -25,23 +25,19 @@ impl<'a, I> Iterator for FatFileIter<'a, I> where I: Iterator<Item = &'a FatPseu
     type Item = FatFile;
     fn next(&mut self) -> Option<Self::Item> {
         let file_name;
-        let lfn_entries;
         let dentry;
         if self.pseudo_dentry_iter.peek()?.is_long_file_name() {
             let res = self.read_long_file_name();
             file_name = res.0;
-            lfn_entries = res.1.into_iter().rev().collect();
             dentry = self.pseudo_dentry_iter.next()?.as_dentry().unwrap();
         } else {
             dentry = self.pseudo_dentry_iter.next().unwrap().as_dentry().unwrap();
             file_name = dentry.read_short_file_name();
-            lfn_entries = vec![crate::util::short_name_to_long_name(&file_name)];
         }
 
         let file = FatFile {
             name: file_name,
             dentry: *dentry,
-            lfn_entries,
             data_ranges: self.partition.data_ranges(dentry.first_fat_index()),
         };
         Some(file)
@@ -139,11 +135,7 @@ impl<'a, I> Iterator for FatPseudoDentryIter<'a, I> where I: Iterator<Item = Fat
             dentry = self.try_next();
         }
 
-        if dentry.is_some() && dentry.unwrap().is_dir_table_end() {
-            return None;
-        }
-
-        dentry
+        dentry.filter(|dentry| !dentry.is_dir_table_end())
     }
 }
 

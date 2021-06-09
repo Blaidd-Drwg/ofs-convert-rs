@@ -21,7 +21,7 @@ uint32_t save_inode(ext4_inode *inode) {
     return first_free_inode_no++;
 }
 
-uint32_t build_inode(fat_dentry *dentry) {
+uint32_t build_inode(const fat_dentry *dentry) {
     ext4_inode inode;
     memset(&inode, 0, sizeof inode);
     inode.i_mode = static_cast<uint16_t>(0755) | (is_dir(dentry) ? S_IFDIR : S_IFREG);
@@ -33,7 +33,7 @@ uint32_t build_inode(fat_dentry *dentry) {
     inode.i_crtime = fat_time_to_unix(dentry->create_date, dentry->create_time);
     inode.i_mtime = fat_time_to_unix(dentry->mod_date, dentry->mod_time);
     inode.i_ctime = inode.i_mtime + 1;  // mimic behavior of the Linux FAT driver
-    inode.i_links_count = is_dir(dentry) ? 2 : 1; // TODO fuck hardlinks
+    inode.i_links_count = 1; // TODO fuck hardlinks
     inode.i_flags = 0x80000;  // uses extents
     inode.ext_header = init_extent_header();
 
@@ -51,7 +51,7 @@ void build_root_inode() {
     inode.i_atime = (uint32_t) time(NULL);
     inode.i_ctime = (uint32_t) time(NULL);
     inode.i_mtime = (uint32_t) time(NULL);
-    inode.i_links_count = 3;
+    inode.i_links_count = 0;
     inode.i_flags = 0x80000;  // uses extents
     inode.ext_header = init_extent_header();
 
@@ -67,7 +67,7 @@ void build_lost_found_inode() {
     inode.i_atime = (uint32_t) time(NULL);
     inode.i_ctime = (uint32_t) time(NULL);
     inode.i_mtime = (uint32_t) time(NULL);
-    inode.i_links_count = 2;
+    inode.i_links_count = 1;
     inode.i_flags = 0x80000;  // uses extents
     inode.ext_header = init_extent_header();
 

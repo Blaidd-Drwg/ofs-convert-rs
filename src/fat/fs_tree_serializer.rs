@@ -1,10 +1,13 @@
 use crate::fat::{FatDentry, FatPartition, FatFile, ROOT_FAT_IDX, ClusterIdx};
 use crate::stream_archiver::{StreamArchiver, Reader};
+use crate::c_wrapper::{c_build_directory, c_build_regular_file, c_finalize_directory, DentryWritePosition};
+use crate::allocator::Allocator;
+use crate::ranges::Ranges;
 
 use chrono::prelude::*;
 use std::convert::{TryFrom, TryInto};
 use std::ops::Range;
-
+use std::rc::Rc;
 
 
 type Timestamp = u32;
@@ -16,7 +19,9 @@ enum FileType {
 }
 
 pub struct FsTreeSerializer<'a> {
+    allocator: Rc<Allocator<'a>>, // Rc to be shared with `self.stream_archiver` and nobody else, otherwise `into_deserializer` will panic
     stream_archiver: StreamArchiver<'a>,
+    forbidden_ranges: Ranges<ClusterIdx>, // ranges that cannot contain any data as they will be overwritten with ext4 metadata
 }
 
 /// A slimmed down representation of the relevant components of a FAT dentry for serialization
@@ -39,13 +44,6 @@ impl DentryRepresentation {
 }
 
 pub fn fat_time_to_unix_time(date: u16, time: Option<u16>) -> u32 {
-    // datetm.tm_year = ((date & 0xFE00) >> 9) + 80;
-    // datetm.tm_mon= ((date & 0x1E0) >> 5) - 1;
-    // datetm.tm_mday = date & 0x1F;
-    // datetm.tm_hour = (time & 0xF800) >> 11;
-    // datetm.tm_min = (time & 0x7E0) >> 5;
-    // datetm.tm_sec = (time & 0x1F) * 2;
-
     let year = ((date & 0xFE00) >> 9) + 1980;
     let month = (date & 0x1E0) >> 5;
     let day = date & 0x1F;
@@ -65,19 +63,24 @@ pub fn fat_time_to_unix_time(date: u16, time: Option<u16>) -> u32 {
 }
 
 impl<'a> FsTreeSerializer<'a> {
-    pub fn new(stream_archiver: StreamArchiver<'a>) -> Self {
-        Self { stream_archiver }
+    pub fn new(allocator: Allocator<'a>, cluster_size: usize, forbidden_ranges: Ranges<ClusterIdx>) -> Self {
+        let allocator = Rc::new(allocator);
+        let stream_archiver = StreamArchiver::new(allocator.clone(), cluster_size);
+        Self { allocator, stream_archiver, forbidden_ranges }
     }
 
     pub fn serialize_directory_tree(&mut self, partition: &FatPartition) {
-        let root_file = FatFile {
-            name: "".to_string(),
-            lfn_entries: Vec::new(),
-            dentry: FatDentry::root_dentry(),
-            data_ranges: partition.data_ranges(ROOT_FAT_IDX)
-        };
         unsafe {
-            self.serialize_directory(root_file, partition);
+            let root_child_count = partition.dir_content_iter(ROOT_FAT_IDX).count();
+            self.archive_root_child_count(root_child_count.try_into().unwrap());
+
+            for file in partition.dir_content_iter(ROOT_FAT_IDX) {
+                if file.dentry.is_dir() {
+                    self.serialize_directory(file, partition);
+                } else {
+                    self.archive_file(file, partition);
+                }
+            }
         }
     }
 
@@ -90,52 +93,122 @@ impl<'a> FsTreeSerializer<'a> {
             if file.dentry.is_dir() {
                 self.serialize_directory(file, partition);
             } else {
-                self.archive_file(file);
+                self.archive_file(file, partition);
             }
         }
     }
 
-    pub fn archive_file(&mut self, file: FatFile) {
+    pub fn archive_root_child_count(&mut self, root_child_count: u32) {
+        self.stream_archiver.archive(vec![FileType::Directory(root_child_count)]);
+    }
+
+    pub fn archive_file(&mut self, mut file: FatFile, partition: &FatPartition) {
+        self.copy_data_to_unforbidden(&mut file, partition);
+        self.stream_archiver.archive(vec![FileType::RegularFile]);
         self.stream_archiver.archive(vec![file.dentry]);
         self.stream_archiver.archive(file.name.into_bytes());
-        self.stream_archiver.archive(vec![FileType::RegularFile]);
         self.stream_archiver.archive(file.data_ranges);
     }
 
     pub fn archive_directory(&mut self, file: FatFile, child_count: u32) {
+        self.stream_archiver.archive(vec![FileType::Directory(child_count)]);
         self.stream_archiver.archive(vec![file.dentry]);
         self.stream_archiver.archive(file.name.into_bytes());
-        self.stream_archiver.archive(vec![FileType::Directory(child_count)]);
+    }
+
+    fn copy_data_to_unforbidden(&self, file: &mut FatFile, partition: &FatPartition) {
+        let old_ranges = std::mem::take(&mut file.data_ranges);
+        for range in old_ranges {
+            for (range_fragment, forbidden) in self.forbidden_ranges.split_overlapping(range) {
+                if forbidden {
+                    let mut copied_ranges = self.copy_range_to_unforbidden(range_fragment, partition);
+                    file.data_ranges.append(&mut copied_ranges);
+                } else {
+                    file.data_ranges.push(range_fragment);
+                }
+            }
+        }
+    }
+
+    fn copy_range_to_unforbidden(&self, mut range: Range<ClusterIdx>, partition: &FatPartition) -> Vec<Range<ClusterIdx>> {
+        let mut copied_fragments = Vec::new();
+        while !range.is_empty() {
+            let allocated = self.allocator.allocate(range.len());
+            for (old_cluster_idx, new_cluster_idx) in range.clone().zip(allocated.clone()) {
+                let old_data_cluster_idx = partition.cluster_idx_to_data_cluster_idx(old_cluster_idx).unwrap();
+                let old_cluster = partition.data_cluster(old_data_cluster_idx);
+                self.allocator.cluster_mut(new_cluster_idx).copy_from_slice(old_cluster);
+            }
+            copied_fragments.push(ClusterIdx::from(allocated.start) .. ClusterIdx::from(allocated.end));
+            range.start += allocated.count() as u32;
+        }
+        copied_fragments
     }
 
     pub fn into_deserializer(self) -> FsTreeDeserializer<'a> {
-        FsTreeDeserializer { reader: self.stream_archiver.into_reader() }
+        std::mem::drop(self.allocator); // drop the Rc, allowing `self.stream_archiver` to unwrap it
+        let (reader, allocator) = self.stream_archiver.into_reader();
+        FsTreeDeserializer { reader, allocator }
     }
 }
 
 pub struct FsTreeDeserializer<'a> {
     reader: Reader<'a>,
+    pub allocator: Allocator<'a>, // TODO temporarily pub
 }
 
 impl<'a> FsTreeDeserializer<'a> {
-    pub fn deserialize_directory_tree(&mut self) {
-        self.deserialize_file();
+    pub fn deserialize_directory_tree(&mut self, root_dentry_write_position: &mut DentryWritePosition) {
+        for _ in 0..self.read_root_child_count() {
+            self.deserialize_file(root_dentry_write_position);
+        }
+        // handled by end_writing
+        // c_finalize_directory(root_dentry_write_position);
     }
 
-    pub fn deserialize_file(&mut self) {
+    pub fn read_root_child_count(&mut self) -> u32 {
+        if let FileType::Directory(child_count) = unsafe { self.reader.next::<FileType>()[0] } {
+            child_count
+        } else {
+            panic!("First StreamArchiver entry is not root directory child count");
+        }
+    }
+
+    pub fn deserialize_file(&mut self, parent_dentry_write_position: &mut DentryWritePosition) {
         unsafe {
-            let dentry = self.reader.next::<FatDentry>()[0];
-            let name = String::from_utf8(self.reader.next::<u8>()).unwrap();
             let file_type = self.reader.next::<FileType>()[0];
             match file_type {
-                FileType::Directory(child_count) => {
-                    for _ in 0..child_count {
-                        self.deserialize_file();
-                    }
-                },
-                FileType::RegularFile => { self.reader.next::<Range<ClusterIdx>>(); },
+                FileType::Directory(child_count) => self.deserialize_directory(parent_dentry_write_position, child_count),
+                FileType::RegularFile => self.deserialize_regular_file(parent_dentry_write_position),
             }
-            println!("{}", name);
         }
+    }
+
+    unsafe fn deserialize_directory(&mut self, parent_dentry_write_position: &mut DentryWritePosition, child_count: u32) {
+        let dentry = self.reader.next::<FatDentry>()[0];
+        let name = String::from_utf8(self.reader.next::<u8>()).unwrap();
+        let mut dentry_write_position = c_build_directory(
+            dentry,
+            name,
+            parent_dentry_write_position,
+            &mut || u32::from(self.allocator.allocate_one())
+        );
+        for _ in 0..child_count {
+            self.deserialize_file(&mut dentry_write_position);
+        }
+        c_finalize_directory(&mut dentry_write_position);
+    }
+
+    unsafe fn deserialize_regular_file(&mut self, parent_dentry_write_position: &mut DentryWritePosition) {
+        let dentry = self.reader.next::<FatDentry>()[0];
+        let name = String::from_utf8(self.reader.next::<u8>()).unwrap();
+        let extents = self.reader.next::<Range<ClusterIdx>>();
+        c_build_regular_file(
+            dentry,
+            name,
+            extents,
+            parent_dentry_write_position,
+            &mut || u32::from(self.allocator.allocate_one())
+        );
     }
 }

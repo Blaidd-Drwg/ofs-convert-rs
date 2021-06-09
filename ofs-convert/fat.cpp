@@ -42,7 +42,7 @@ uint32_t file_cluster_no(struct fat_dentry *dentry) {
     return high | low;
 }
 
-bool is_dir(struct fat_dentry *dentry) {
+bool is_dir(const struct fat_dentry *dentry) {
     return dentry->attrs & 0x10;
 }
 
@@ -128,14 +128,14 @@ void read_boot_sector(uint8_t *fs) {
     boot_sector = *(struct boot_sector*) fs;
 }
 
-void set_meta_info(uint8_t *fs) {
-    meta_info.fs_start = fs;
-    meta_info.fat_start = (uint32_t *) (fs + boot_sector.sectors_before_fat * boot_sector.bytes_per_sector);
+void set_meta_info(uint8_t *fs_start) {
+    meta_info.fs_start = fs_start;
+    meta_info.fat_start = (uint32_t *) (fs_start + boot_sector.sectors_before_fat * boot_sector.bytes_per_sector);
     meta_info.fat_entries = boot_sector.sectors_per_fat / boot_sector.sectors_per_cluster;
     meta_info.cluster_size = boot_sector.sectors_per_cluster * boot_sector.bytes_per_sector;
     meta_info.dentries_per_cluster = meta_info.cluster_size / sizeof(struct fat_dentry);
     meta_info.sectors_before_data = boot_sector.sectors_before_fat + boot_sector.sectors_per_fat * boot_sector.fat_count;
-    meta_info.data_start = fs + meta_info.sectors_before_data * boot_sector.bytes_per_sector;
+    meta_info.data_start = fs_start + meta_info.sectors_before_data * boot_sector.bytes_per_sector;
 
     visualizer_add_block_range({
         BlockRange::FAT,

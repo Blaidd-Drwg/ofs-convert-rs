@@ -1,6 +1,6 @@
-use crate::allocator::{Allocator, AllocatedClusterIdx};
+use crate::allocator::{Allocator, AllocatedClusterIdx, AllocatedReader};
 use std::mem::size_of;
-use std::cell::Ref;
+use std::rc::Rc;
 
 type Page = [u8];
 type PageIdx = Option<AllocatedClusterIdx>;
@@ -12,7 +12,7 @@ pub struct StreamArchiver<'a> {
 	current_header: Header, // `current_header.len` encodes how many objects are still expected
 	page_size: usize,
 	position_in_tail_page: usize,
-	allocator: &'a Allocator<'a>,
+	allocator: Rc<Allocator<'a>>,
 }
 
 #[derive(Copy, Clone)]
@@ -21,13 +21,8 @@ struct Header {
 	pub size: usize,
 }
 
-// options:
-// 1) store raw head pointer. method to_read_archiver consumes self and turns it into a reference.
-//    problem: we don't necessarily have the mutable borrow on head anymore. so it's possible
-//    someone else took it and we're aliasing it.
-// 2)
 impl<'a> StreamArchiver<'a> {
-	pub fn new(allocator: &'a Allocator<'a>, page_size: usize) -> Self {
+	pub fn new(allocator: Rc<Allocator<'a>>, page_size: usize) -> Self {
 		const MIN_PAGE_PAYLOAD_SIZE: usize = 50;
 		assert!(page_size >= size_of::<PageIdx>() + MIN_PAGE_PAYLOAD_SIZE);
 
@@ -42,10 +37,11 @@ impl<'a> StreamArchiver<'a> {
 		}
 	}
 
-	// TODO make StreamArchiver clusters into used or something??
-	pub fn into_reader(mut self) -> Reader<'a> {
+	pub fn into_reader(mut self) -> (Reader<'a>, Allocator<'a>) {
 		self.write_page();
-		Reader::new(self.head, self.page_size, self.allocator)
+		let allocator = Rc::try_unwrap(self.allocator).expect("StreamArchiver cannot take ownership of its allocator, somebody else still has a reference to it.");
+		let (allocated_reader, new_allocator) = allocator.split_into_reader();
+		(Reader::new(self.head, self.page_size, allocated_reader), new_allocator)
 	}
 
 	pub fn archive<T>(&mut self, objects: Vec<T>) {
@@ -67,7 +63,8 @@ impl<'a> StreamArchiver<'a> {
 			let mut previous_page = self.allocator.cluster_mut(previous_page_idx);
 			// SAFETY: TODO
 			unsafe {
-				std::ptr::write_unaligned(previous_page.as_mut_ptr() as *mut PageIdx, page_idx);
+				let ptr = previous_page.as_mut_ptr() as *mut PageIdx;
+				ptr.write_unaligned(page_idx);
 			}
 		}
 
@@ -122,21 +119,21 @@ impl<'a> StreamArchiver<'a> {
 
 
 pub struct Reader<'a> {
-	current_page: Ref<'a, Page>,
+	current_page: &'a Page,
 	page_size: usize,
 	position_in_current_page: usize,
 	current_header: Header,
-	allocator: &'a Allocator<'a>
+	allocator: AllocatedReader<'a>
 }
 
 impl<'a> Reader<'a> {
-	pub fn new(first_page_idx: PageIdx, page_size: usize, allocator: &'a Allocator<'a>) -> Self {
+	pub fn new(first_page_idx: PageIdx, page_size: usize, allocated_reader: AllocatedReader<'a>) -> Self {
 		Self {
-			current_page: allocator.cluster(first_page_idx.expect("Reader initialized with empty StreamArchiver")),
+			current_page: allocated_reader.cluster(first_page_idx.expect("Reader initialized with empty StreamArchiver")),
 			page_size,
 			position_in_current_page: size_of::<PageIdx>(),
 			current_header: Header { len: 0, size: 0 },
-			allocator,
+			allocator: allocated_reader,
 		}
 	}
 

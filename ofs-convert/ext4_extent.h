@@ -1,5 +1,6 @@
 #ifndef OFS_EXT4_EXTENT_H
 #define OFS_EXT4_EXTENT_H
+#include <cstddef>
 #include <stdint.h>
 
 constexpr uint16_t EH_MAGIC = 0xF30A;
@@ -39,8 +40,8 @@ struct ext4_extent_tail {
 };
 
 ext4_extent_header init_extent_header();
-void register_extent(fat_extent *ext, uint32_t inode_number, bool add_to_extent_tree = true);
-void set_extents(uint32_t inode_number, fat_dentry *dentry, StreamArchiver *read_stream);
+void register_extent(const fat_extent *ext, uint32_t inode_number, bool add_to_extent_tree = true);
+void set_extents(uint32_t inode_number, const fat_dentry *dentry, const fat_extent extents[], size_t extent_count);
 ext4_extent last_extent(uint32_t inode_number);
 
 #endif //OFS_EXT4_EXTENT_H
