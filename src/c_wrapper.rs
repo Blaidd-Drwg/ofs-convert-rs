@@ -1,14 +1,14 @@
-use crate::fat::{BootSector, FatDentry, ClusterIdx};
-use crate::ext4::SuperBlock;
-use crate::fat::Extent;
-use std::convert::{TryInto, TryFrom};
-use std::ops::Range;
+use std::convert::{TryFrom, TryInto};
 use std::ffi::c_void;
+use std::ops::Range;
+
+use crate::ext4::SuperBlock;
+use crate::fat::{BootSector, ClusterIdx, Extent, FatDentry};
 
 mod ffi {
-    use crate::fat::{BootSector, FatDentry};
-    use crate::ext4::SuperBlock;
     use crate::c_wrapper::DentryWritePosition;
+    use crate::ext4::SuperBlock;
+    use crate::fat::{BootSector, FatDentry};
 
     pub type AllocatorData = *mut ::std::os::raw::c_void;
     pub type AllocatorFunc = unsafe extern "C" fn(arg1: AllocatorData) -> u32;
@@ -24,7 +24,11 @@ mod ffi {
         ) -> DentryWritePosition;
 
         #[link_name = "\u{1}_Z11end_writing19DentryWritePositionPFjPvES0_"]
-        pub fn end_writing(dentry_write_position: DentryWritePosition, allocate_block_callback: AllocatorFunc, allocator_data: AllocatorData);
+        pub fn end_writing(
+            dentry_write_position: DentryWritePosition,
+            allocate_block_callback: AllocatorFunc,
+            allocator_data: AllocatorData,
+        );
 
         #[link_name = "\u{1}_Z18build_regular_filePK10fat_dentryPKhmR19DentryWritePositionPFjPvES6_PK10fat_extentm"]
         pub fn build_regular_file(
@@ -63,8 +67,8 @@ mod ffi {
     #[derive(Debug, Copy, Clone)]
     pub struct Extent {
         pub logical_start: u32,  // First file cluster number that this extent covers
-        pub length: u16,  // Number of clusters covered by extent
-        pub physical_start: u32,  // Physical cluster number to which this extent points
+        pub length: u16,         // Number of clusters covered by extent
+        pub physical_start: u32, // Physical cluster number to which this extent points
     }
 }
 
@@ -82,23 +86,26 @@ pub unsafe fn c_initialize(partition_ptr: *mut u8, superblock: SuperBlock, boot_
     ffi::initialize(partition_ptr, superblock, boot_sector);
 }
 
-pub unsafe fn c_start_writing<F>(allocate_block_callback: &mut F) -> DentryWritePosition where F: FnMut() -> u32 {
+pub unsafe fn c_start_writing<F>(allocate_block_callback: &mut F) -> DentryWritePosition
+where F: FnMut() -> u32 {
     let (allocator_callback, allocator_data) = wrap_allocator_callback(allocate_block_callback);
     ffi::start_writing(allocator_callback, allocator_data)
-    // DentryWritePosition { inode_no: 2, block_no: 0, position_in_block: 0, block_count: 0, previous_dentry: std::ptr::null_mut() }
+    // DentryWritePosition { inode_no: 2, block_no: 0, position_in_block: 0, block_count: 0, previous_dentry:
+    // std::ptr::null_mut() }
 }
 
-pub unsafe fn c_end_writing<F>(dentry_write_position: DentryWritePosition, allocate_block_callback: &mut F) where F: FnMut() -> u32 {
+pub unsafe fn c_end_writing<F>(dentry_write_position: DentryWritePosition, allocate_block_callback: &mut F)
+where F: FnMut() -> u32 {
     let (allocator_callback, allocator_data) = wrap_allocator_callback(allocate_block_callback);
     ffi::end_writing(dentry_write_position, allocator_callback, allocator_data);
 }
 
-fn wrap_allocator_callback<F>(allocator_callback: &mut F) -> (ffi::AllocatorFunc, ffi::AllocatorData) where F: FnMut() -> u32 {
-    extern "C" fn callback_wrapper<F>(closure_ptr: *mut c_void) -> u32 where F: FnMut() -> u32 {
+fn wrap_allocator_callback<F>(allocator_callback: &mut F) -> (ffi::AllocatorFunc, ffi::AllocatorData)
+where F: FnMut() -> u32 {
+    extern "C" fn callback_wrapper<F>(closure_ptr: *mut c_void) -> u32
+    where F: FnMut() -> u32 {
         let closure = closure_ptr as *mut F;
-        unsafe {
-             (*closure)()
-        }
+        unsafe { (*closure)() }
     }
     let allocator_data = allocator_callback as *mut _ as ffi::AllocatorData;
     (callback_wrapper::<F>, allocator_data)
@@ -109,8 +116,10 @@ pub fn c_build_regular_file<F>(
     name: String,
     extents: Vec<Range<ClusterIdx>>,
     parent_dentry_write_position: &mut DentryWritePosition,
-    allocate_block_callback: &mut F
-) where F: FnMut() -> u32 {
+    allocate_block_callback: &mut F,
+) where
+    F: FnMut() -> u32,
+{
     let c_extents = to_c_extents(&extents);
     let (allocator_callback, allocator_data) = wrap_allocator_callback(allocate_block_callback);
     unsafe {
@@ -131,8 +140,11 @@ pub fn c_build_directory<F>(
     dentry: FatDentry,
     name: String,
     parent_dentry_write_position: &mut DentryWritePosition,
-    allocate_block_callback: &mut F
-) -> DentryWritePosition where F: FnMut() -> u32 {
+    allocate_block_callback: &mut F,
+) -> DentryWritePosition
+where
+    F: FnMut() -> u32,
+{
     let (allocator_callback, allocator_data) = wrap_allocator_callback(allocate_block_callback);
     unsafe {
         ffi::build_directory(
@@ -147,15 +159,14 @@ pub fn c_build_directory<F>(
 }
 
 pub fn c_finalize_directory(dentry_write_position: &mut DentryWritePosition) {
-    unsafe {
-        ffi::finalize_dir(dentry_write_position)
-    }
+    unsafe { ffi::finalize_dir(dentry_write_position) }
 }
 
 // TODO type conversions
 fn to_c_extents(data_ranges: &[Extent]) -> Vec<ffi::Extent> {
     let mut extent_start = 0;
-    data_ranges.iter()
+    data_ranges
+        .iter()
         .map(|range| {
             let c_extent = ffi::Extent {
                 logical_start: extent_start,

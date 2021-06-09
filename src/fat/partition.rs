@@ -1,11 +1,14 @@
-use crate::fat::{BootSector, Cluster, FatTableIndex, ClusterIdx, FatFileIter, FatIdxIter, FatFile, DataClusterIdx, ROOT_FAT_IDX};
-use crate::allocator::Allocator;
-use crate::ranges::Ranges;
-use crate::util::ExactAlign;
-use crate::ext4::Ext4Partition;
 use std::convert::TryFrom;
 use std::mem::size_of;
 use std::ops::Range;
+
+use crate::allocator::Allocator;
+use crate::ext4::Ext4Partition;
+use crate::fat::{
+    BootSector, Cluster, ClusterIdx, DataClusterIdx, FatFile, FatFileIter, FatIdxIter, FatTableIndex, ROOT_FAT_IDX,
+};
+use crate::ranges::Ranges;
+use crate::util::ExactAlign;
 
 
 /// A FAT32 partition consists of 3 regions: the reserved sectors (which include the boot sector),
@@ -44,9 +47,7 @@ impl<'a> FatPartition<'a> {
         // reserved clusters, the FAT clusters, and the data clusters that contain data) and unused
         // clusters (i.e. the data clusters that contain no data). FatPartition will only ever
         // read used clusters. Allocator will only ever read and write unused clusters.
-        let partition_data_alias = unsafe {
-            std::slice::from_raw_parts(partition_data.as_ptr(), partition_data.len())
-        };
+        let partition_data_alias = unsafe { std::slice::from_raw_parts(partition_data.as_ptr(), partition_data.len()) };
         let instance = Self::new(partition_data_alias);
         let allocator = Allocator::new(partition_data, instance.cluster_size(), instance.used_ranges());
         (instance, allocator)
@@ -82,7 +83,7 @@ impl<'a> FatPartition<'a> {
         let data_cluster_idx = cluster_idx.checked_sub(self.boot_sector.first_data_cluster());
         match data_cluster_idx {
             Some(data_cluster_idx) => Ok(DataClusterIdx::new(data_cluster_idx)),
-            None => Err("cluster_idx is not a data cluster index")
+            None => Err("cluster_idx is not a data cluster index"),
         }
     }
 
@@ -90,13 +91,13 @@ impl<'a> FatPartition<'a> {
     pub fn data_cluster(&self, data_cluster_idx: DataClusterIdx) -> &Cluster {
         let cluster_size = self.cluster_size();
         let start_byte = usize::from(data_cluster_idx) * cluster_size;
-        &self.data[start_byte..start_byte+cluster_size]
+        &self.data[start_byte..start_byte + cluster_size]
     }
 
     pub fn read_data_cluster(&self, data_cluster_idx: DataClusterIdx) -> Vec<u8> {
         let cluster_size = self.cluster_size();
         let start_byte = usize::try_from(data_cluster_idx).unwrap() * cluster_size;
-        self.data[start_byte..start_byte+cluster_size].to_vec()
+        self.data[start_byte..start_byte + cluster_size].to_vec()
     }
 
     /// Given the index of a directory's first cluster, iterate over the directory's content.
@@ -105,7 +106,8 @@ impl<'a> FatPartition<'a> {
         FatFileIter::new(first_fat_idx, self, self.boot_sector().dentries_per_cluster())
     }
 
-    /// Given a file's first FAT index, follow the FAT chain and collect all of the file's FAT indices into a list of adjacent ranges.
+    /// Given a file's first FAT index, follow the FAT chain and collect all of the file's FAT indices into a list of
+    /// adjacent ranges.
     pub fn data_ranges(&'a self, first_fat_idx: FatTableIndex) -> Vec<Range<ClusterIdx>> {
         if first_fat_idx.is_zero_length_file() {
             return Vec::new();
@@ -143,7 +145,7 @@ impl<'a> FatPartition<'a> {
         for (fat_idx, &fat_cell) in self.fat_table().iter().enumerate().skip(u32::from(ROOT_FAT_IDX) as usize) {
             if !fat_cell.is_free() {
                 let range_start = FatTableIndex::try_from(fat_idx).unwrap().to_cluster_idx(self.boot_sector());
-                ranges.insert(range_start..range_start+1);
+                ranges.insert(range_start..range_start + 1);
             }
         }
         ranges
@@ -152,28 +154,44 @@ impl<'a> FatPartition<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::partition::Partition;
-    use crate::fat::ROOT_FAT_IDX;
+    use std::array::IntoIter;
     use std::collections::HashSet;
     use std::iter::FromIterator;
-    use std::array::IntoIter;
+
+    use super::*;
+    use crate::fat::ROOT_FAT_IDX;
+    use crate::partition::Partition;
 
     #[test]
     fn iterates_over_dir_content() {
         static EXPECTED_FILE_NAMES: [&str; 20] = [
-            "a", "adfdfafd", "asda", "asdf", "asdfdf", "asdfdfdfdf", "asds", "b", "c", "d",
-            "dfdsafdsf", "e", "f", "fdfad", "fdfdfdfd", "g", "qwe", "qwew", "sdfsdf", "swag"
+            "a",
+            "adfdfafd",
+            "asda",
+            "asdf",
+            "asdfdf",
+            "asdfdfdfdf",
+            "asds",
+            "b",
+            "c",
+            "d",
+            "dfdsafdsf",
+            "e",
+            "f",
+            "fdfad",
+            "fdfdfdfd",
+            "g",
+            "qwe",
+            "qwew",
+            "sdfsdf",
+            "swag",
         ];
         let expected_file_names = HashSet::from_iter(EXPECTED_FILE_NAMES.iter().map(|s| s.to_string()));
 
         let mut partition = Partition::open("examples/fat.master.bak").unwrap();
         unsafe {
             let fat_partition = FatPartition::new(partition.as_mut_slice());
-            let file_names: HashSet<_> = fat_partition
-                .dir_content_iter(ROOT_FAT_IDX)
-                .map(|file| file.name)
-                .collect();
+            let file_names: HashSet<_> = fat_partition.dir_content_iter(ROOT_FAT_IDX).map(|file| file.name).collect();
             assert_eq!(file_names, expected_file_names);
         }
     }

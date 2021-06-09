@@ -1,10 +1,11 @@
-use crate::ranges::{Ranges, NotCoveredRange};
-use crate::fat::ClusterIdx;
-use std::ops::Range;
+use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::convert::TryFrom;
-use std::cell::{RefCell, Cell, Ref, RefMut};
-use std::iter::Step;
 use std::io;
+use std::iter::Step;
+use std::ops::Range;
+
+use crate::fat::ClusterIdx;
+use crate::ranges::{NotCoveredRange, Ranges};
 
 // TODO after reading, make directory dataclusters free
 // TODO ensure DataClusterIdx can also not be constructed
@@ -59,7 +60,8 @@ pub struct Allocator<'a> {
     partition_data: RefCell<&'a mut [u8]>,
     /// the cluster that the Allocator will try to allocate next
     cursor: Cell<ClusterIdx>,
-    /// clusters before this index are marked as used and cannot be accessed over the methods `cluster` and `cluster_mut`
+    /// clusters before this index are marked as used and cannot be accessed over the methods `cluster` and
+    /// `cluster_mut`
     first_valid_index: ClusterIdx,
     /// clusters that will not be allocated
     used_ranges: Ranges<ClusterIdx>,
@@ -91,7 +93,7 @@ impl<'a> Allocator<'a> {
 
         let reader = AllocatedReader {
             partition_data: allocated,
-            cluster_size: self.cluster_size
+            cluster_size: self.cluster_size,
         };
 
         let allocator = Self {
@@ -112,20 +114,30 @@ impl<'a> Allocator<'a> {
     /// Returns a cluster range that may be exclusively used by the caller with 1 <= `range.len()` <= `max_length`.
     // TODO error handling
     pub fn allocate(&self, max_length: usize) -> Range<AllocatedClusterIdx> {
-        let free_range = self.find_next_free_range(self.cursor.get()).expect("Oh no, no more free blocks :(((");
+        let free_range = self
+            .find_next_free_range(self.cursor.get())
+            .expect("Oh no, no more free blocks :(((");
         let range_end = free_range.end.min(free_range.start + max_length as u32);
         self.cursor.set(range_end);
         AllocatedClusterIdx(free_range.start)..AllocatedClusterIdx(range_end)
     }
 
     pub fn cluster(&'a self, idx: AllocatedClusterIdx) -> Ref<'a, [u8]> {
-        let start_byte = self.cluster_start_byte(idx).expect("Attempted to access an allocated cluster that has been made invalid");
-        Ref::map(self.partition_data.borrow(), |data| &data[start_byte..start_byte+self.cluster_size])
+        let start_byte = self
+            .cluster_start_byte(idx)
+            .expect("Attempted to access an allocated cluster that has been made invalid");
+        Ref::map(self.partition_data.borrow(), |data| {
+            &data[start_byte..start_byte + self.cluster_size]
+        })
     }
 
     pub fn cluster_mut(&self, idx: AllocatedClusterIdx) -> RefMut<[u8]> {
-        let start_byte = self.cluster_start_byte(idx).expect("Attempted to access an allocated cluster that has been made invalid");
-        RefMut::map(self.partition_data.borrow_mut(), |data| &mut data[start_byte..start_byte+self.cluster_size])
+        let start_byte = self
+            .cluster_start_byte(idx)
+            .expect("Attempted to access an allocated cluster that has been made invalid");
+        RefMut::map(self.partition_data.borrow_mut(), |data| {
+            &mut data[start_byte..start_byte + self.cluster_size]
+        })
     }
 
     /// Returns the position in `self.partition_data` at which the cluster `idx` starts or None if
@@ -146,7 +158,10 @@ impl<'a> Allocator<'a> {
         };
 
         if non_used_range.is_empty() {
-            Err(io::Error::new(io::ErrorKind::UnexpectedEof, "No free clusters left in the partition"))
+            Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "No free clusters left in the partition",
+            ))
         } else {
             Ok(non_used_range)
         }
@@ -163,6 +178,6 @@ pub struct AllocatedReader<'a> {
 impl<'a> AllocatedReader<'a> {
     pub fn cluster(&self, idx: AllocatedClusterIdx) -> &'a [u8] {
         let start_byte = self.cluster_size * usize::from(idx);
-        &self.partition_data[start_byte..start_byte+self.cluster_size]
+        &self.partition_data[start_byte..start_byte + self.cluster_size]
     }
 }

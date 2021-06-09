@@ -1,7 +1,7 @@
-use crate::fat::{ClusterIdx, BootSector, ROOT_FAT_IDX};
-
-use std::ops::{Add, AddAssign, Index};
 use std::convert::TryFrom;
+use std::ops::{Add, AddAssign, Index};
+
+use crate::fat::{BootSector, ClusterIdx, ROOT_FAT_IDX};
 
 /// An index identifying a FAT entry.
 #[derive(PartialEq, Eq, Copy, Clone, PartialOrd, Ord)]
@@ -32,7 +32,8 @@ impl FatTableIndex {
 
     pub fn to_cluster_idx(self, boot_sector: &BootSector) -> ClusterIdx {
         let data_start_byte_idx = boot_sector.get_data_range().start;
-        let data_start_cluster_idx = data_start_byte_idx / (usize::from(boot_sector.bytes_per_sector) * usize::from(boot_sector.sectors_per_cluster));
+        let data_start_cluster_idx = data_start_byte_idx
+            / (usize::from(boot_sector.bytes_per_sector) * usize::from(boot_sector.sectors_per_cluster));
         u32::from(self.to_data_cluster_idx()) + u32::try_from(data_start_cluster_idx).unwrap()
     }
 

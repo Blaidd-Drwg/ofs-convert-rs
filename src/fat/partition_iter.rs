@@ -1,9 +1,13 @@
-use crate::fat::{FatPartition, FatPseudoDentry, FatTableIndex, FatFile};
-use crate::util::ExactAlign;
 use std::iter::Peekable;
+
 use itertools::free::join;
 
-pub struct FatFileIter<'a, I> where I: Iterator<Item = &'a FatPseudoDentry> {
+use crate::fat::{FatFile, FatPartition, FatPseudoDentry, FatTableIndex};
+use crate::util::ExactAlign;
+
+pub struct FatFileIter<'a, I>
+where I: Iterator<Item = &'a FatPseudoDentry>
+{
     pseudo_dentry_iter: Peekable<I>,
     partition: &'a FatPartition<'a>,
 }
@@ -15,13 +19,20 @@ impl<'a> FatFileIter<'a, FatPseudoDentryIter<'a, FatIdxIter<'a>>> {
     }
 }
 
-impl<'a, I> FatFileIter<'a, I> where I: Iterator<Item = &'a FatPseudoDentry> {
+impl<'a, I> FatFileIter<'a, I>
+where I: Iterator<Item = &'a FatPseudoDentry>
+{
     pub fn from_pseudo_dentry_iter(pseudo_dentry_iter: I, partition: &'a FatPartition<'a>) -> Self {
-        Self { pseudo_dentry_iter: pseudo_dentry_iter.peekable(), partition }
+        Self {
+            pseudo_dentry_iter: pseudo_dentry_iter.peekable(),
+            partition,
+        }
     }
 }
 
-impl<'a, I> Iterator for FatFileIter<'a, I> where I: Iterator<Item = &'a FatPseudoDentry> {
+impl<'a, I> Iterator for FatFileIter<'a, I>
+where I: Iterator<Item = &'a FatPseudoDentry>
+{
     type Item = FatFile;
     fn next(&mut self) -> Option<Self::Item> {
         let file_name;
@@ -45,7 +56,9 @@ impl<'a, I> Iterator for FatFileIter<'a, I> where I: Iterator<Item = &'a FatPseu
 }
 
 /// Caller must ensure that self.pseudo_dentry_iter.next() is a LongFileName
-impl<'a, I> FatFileIter<'a, I> where I: Iterator<Item = &'a FatPseudoDentry> {
+impl<'a, I> FatFileIter<'a, I>
+where I: Iterator<Item = &'a FatPseudoDentry>
+{
     fn read_long_file_name(&mut self) -> (String, Vec<Vec<u16>>) {
         let first_entry = self.pseudo_dentry_iter.next().unwrap().as_long_file_name().unwrap();
         let mut file_name_components = vec![first_entry.to_utf8_string()];
@@ -54,7 +67,8 @@ impl<'a, I> FatFileIter<'a, I> where I: Iterator<Item = &'a FatPseudoDentry> {
 
         let remaining_entry_count = first_entry.sequence_no() - 1; // we already have read one entry and the sequence number is 1-based
         for _ in 0..remaining_entry_count {
-            let long_file_name = self.pseudo_dentry_iter
+            let long_file_name = self
+                .pseudo_dentry_iter
                 .next()
                 .and_then(|pseudo_dentry| pseudo_dentry.as_long_file_name())
                 .expect("FAT partition contains malformed LFN entry");
@@ -69,7 +83,9 @@ impl<'a, I> FatFileIter<'a, I> where I: Iterator<Item = &'a FatPseudoDentry> {
 
 /// Given the index of a directory's initial data cluster, iterates over the directory's valid
 /// pseudo-dentries (excluding the '.' and '..' directories.
-pub struct FatPseudoDentryIter<'a, I> where I: Iterator<Item = FatTableIndex> {
+pub struct FatPseudoDentryIter<'a, I>
+where I: Iterator<Item = FatTableIndex>
+{
     fat_idx_iter: I,
     current_cluster: Option<&'a [FatPseudoDentry]>,
     current_dentry_idx: usize,
@@ -88,10 +104,16 @@ impl<'a> FatPseudoDentryIter<'a, FatIdxIter<'a>> {
 
 // TODO is dentries_per_cluster necessary or is it always true because we calculate it from the same data?
 // When we fix this, also rethink unsafety
-impl<'a, I> FatPseudoDentryIter<'a, I> where I: Iterator<Item = FatTableIndex> {
+impl<'a, I> FatPseudoDentryIter<'a, I>
+where I: Iterator<Item = FatTableIndex>
+{
     /// SAFETY: Safe if `fat_idx_iter` iterates only over clusters belonging to a directory and if
     /// `dentries_per_cluster` is correct.
-    pub unsafe fn from_cluster_iter(fat_idx_iter: I, partition: &'a FatPartition<'a>, dentries_per_cluster: usize) -> Self {
+    pub unsafe fn from_cluster_iter(
+        fat_idx_iter: I,
+        partition: &'a FatPartition<'a>,
+        dentries_per_cluster: usize,
+    ) -> Self {
         let mut instance = Self {
             fat_idx_iter,
             current_cluster: None,
@@ -127,7 +149,9 @@ impl<'a, I> FatPseudoDentryIter<'a, I> where I: Iterator<Item = FatTableIndex> {
         });
     }
 }
-impl<'a, I> Iterator for FatPseudoDentryIter<'a, I> where I: Iterator<Item = FatTableIndex> {
+impl<'a, I> Iterator for FatPseudoDentryIter<'a, I>
+where I: Iterator<Item = FatTableIndex>
+{
     type Item = &'a FatPseudoDentry;
     fn next(&mut self) -> Option<Self::Item> {
         let mut dentry = self.try_next();
@@ -138,7 +162,6 @@ impl<'a, I> Iterator for FatPseudoDentryIter<'a, I> where I: Iterator<Item = Fat
         dentry.filter(|dentry| !dentry.is_dir_table_end())
     }
 }
-
 
 
 /// Given the index of a file's initial data cluster, iterates over the file's data cluster indices.

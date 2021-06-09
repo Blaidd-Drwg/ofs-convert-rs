@@ -1,6 +1,7 @@
-use crate::fat::{FatDentry, ClusterIdx};
-use std::ops::Range;
 use std::convert::TryFrom;
+use std::ops::Range;
+
+use crate::fat::{ClusterIdx, FatDentry};
 
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -39,14 +40,14 @@ impl BootSector {
     pub fn get_fat_table_range(&self) -> Range<usize> {
         let fat_table_start_byte = usize::from(self.sectors_before_fat) * usize::from(self.bytes_per_sector);
         let fat_table_len = usize::try_from(self.sectors_per_fat).unwrap() * usize::from(self.bytes_per_sector);
-        fat_table_start_byte .. fat_table_start_byte + fat_table_len
+        fat_table_start_byte..fat_table_start_byte + fat_table_len
     }
 
     /// Returns the range in bytes of the data region, relative to the partition start
     pub fn get_data_range(&self) -> Range<usize> {
         let first_data_byte = self.first_data_sector() as usize * usize::from(self.bytes_per_sector);
         let partition_size = usize::from(self.bytes_per_sector) * usize::try_from(self.sector_count()).unwrap();
-        first_data_byte .. partition_size
+        first_data_byte..partition_size
     }
 
     fn first_data_sector(&self) -> u32 {
@@ -59,9 +60,9 @@ impl BootSector {
 
     pub fn sector_count(&self) -> u32 {
         if self.sector_count_1 != 0 {
-           u32::from(self.sector_count_1)
+            u32::from(self.sector_count_1)
         } else {
-           self.sector_count_2
+            self.sector_count_2
         }
     }
 
@@ -83,7 +84,9 @@ impl BootSector {
         if self.ext_boot_signature == 0x28 {
             &[]
         } else {
-            let last_character_idx = self.volume_label.iter()
+            let last_character_idx = self
+                .volume_label
+                .iter()
                 .enumerate()
                 .rev()
                 .filter(|(_idx, &character)| character != b' ')

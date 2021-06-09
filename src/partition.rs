@@ -1,12 +1,13 @@
-use std::fs::{OpenOptions, File};
-use std::os::unix::{io::AsRawFd, fs::FileTypeExt};
+use std::fs::{File, OpenOptions};
 use std::io::{self, ErrorKind};
+use std::os::unix::fs::FileTypeExt;
+use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::process::Command;
 use std::slice;
 
-use memmap::{MmapMut, MmapOptions};
 use fs2::FileExt;
+use memmap::{MmapMut, MmapOptions};
 use nix::ioctl_read;
 
 // TODO check whether file is a FAT partition? although this will be hard to check if we can't rely on fsck.fat
@@ -19,7 +20,7 @@ impl Partition {
     pub fn open<P: AsRef<Path>>(partition_path: P) -> io::Result<Self> {
         let partition_path = partition_path.as_ref().canonicalize()?;
         if Self::is_mounted(partition_path.as_path())? {
-            return Err(io::Error::new(io::ErrorKind::AddrInUse, "Partition is already mounted"))
+            return Err(io::Error::new(io::ErrorKind::AddrInUse, "Partition is already mounted"));
         }
         let file = OpenOptions::new().read(true).write(true).create(false).open(partition_path)?;
         // the lock is only advisory, other processes may still access the file
@@ -28,7 +29,7 @@ impl Partition {
 
         let size = Self::get_file_size(&file)?;
         let mmap = unsafe { MmapOptions::new().len(size).map_mut(&file)? };
-        Ok(Self {mmap})
+        Ok(Self { mmap })
     }
 
     pub fn len(&self) -> usize {
@@ -45,36 +46,36 @@ impl Partition {
 
     pub fn as_slice(&self) -> &[u8] {
         // SAFETY: TODO
-        unsafe {
-            slice::from_raw_parts(self.mmap.as_ptr(), self.mmap.len())
-        }
+        unsafe { slice::from_raw_parts(self.mmap.as_ptr(), self.mmap.len()) }
     }
 
     pub fn as_mut_slice(&mut self) -> &mut [u8] {
         // SAFETY: no aliasing because we borrow self as mut; valid length because we get
         // it from `self.mmap`; trivially aligned because it's u8
-        unsafe {
-            slice::from_raw_parts_mut(self.mmap.as_mut_ptr(), self.mmap.len())
-        }
+        unsafe { slice::from_raw_parts_mut(self.mmap.as_mut_ptr(), self.mmap.len()) }
     }
 
     fn get_file_size(file: &File) -> io::Result<usize> {
         let metadata = file.metadata()?;
         let filetype = metadata.file_type();
         if filetype.is_file() {
-            return Ok(metadata.len() as usize)
+            return Ok(metadata.len() as usize);
         } else if filetype.is_block_device() {
-            return Ok(Self::get_block_device_size as usize)
+            return Ok(Self::get_block_device_size as usize);
         }
 
-        Err(io::Error::new(ErrorKind::InvalidInput, "Expected path to a file or a block device"))
+        Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "Expected path to a file or a block device",
+        ))
     }
 
     // error_chain?
     /// partition_path must be absolute
     fn is_mounted(partition_path: &Path) -> io::Result<bool> {
         let path_str = partition_path.to_str().expect("Partition path is not valid UTF-8");
-        let output = String::from_utf8(Command::new("mount").output()?.stdout).expect("mount output is not valid UTF-8");
+        let output =
+            String::from_utf8(Command::new("mount").output()?.stdout).expect("mount output is not valid UTF-8");
         Ok(output.lines().any(|line| line.starts_with(path_str)))
     }
 
@@ -90,7 +91,7 @@ impl Partition {
         unsafe {
             match Self::block_device_size(file.as_raw_fd(), &mut size) {
                 Err(e) => Err(Self::nix_error_to_io_error(e)),
-                Ok(_) => Ok(size)
+                Ok(_) => Ok(size),
             }
         }
     }
@@ -102,15 +103,17 @@ impl Partition {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::io::Write;
+
     use tempfile::NamedTempFile;
+
+    use super::*;
 
     #[test]
     fn opens_file() {
         const FILE_SIZE: usize = 6427;
         let mut tmp_file = NamedTempFile::new().unwrap();
-        tmp_file.as_file_mut().write(&[0;FILE_SIZE]).unwrap();
+        tmp_file.as_file_mut().write(&[0; FILE_SIZE]).unwrap();
 
         let partition = Partition::open(tmp_file.path()).unwrap();
         assert_eq!(partition.len(), FILE_SIZE);
@@ -119,12 +122,14 @@ mod tests {
     #[test]
     #[ignore] // requires sudo
     fn opens_block_device() {
-        const BLOCK_DEVICE: &str = "/dev/sda";  // should use a loop device
+        const BLOCK_DEVICE: &str = "/dev/sda"; // should use a loop device
         assert!(Partition::open(BLOCK_DEVICE).is_ok());
     }
 
     #[test]
-    fn opens_symlink() { unimplemented!() }
+    fn opens_symlink() {
+        unimplemented!()
+    }
 
     #[test]
     fn returns_err_if_file_does_not_exist() {
@@ -148,23 +153,37 @@ mod tests {
     }
 
     #[test]
-    fn returns_err_if_not_file_or_device() { unimplemented!() }
+    fn returns_err_if_not_file_or_device() {
+        unimplemented!()
+    }
 
     #[test]
-    fn returns_err_if_file_locked() { unimplemented!() }
+    fn returns_err_if_file_locked() {
+        unimplemented!()
+    }
 
     #[test]
-    fn returns_err_if_file_mounted() { unimplemented!() }
+    fn returns_err_if_file_mounted() {
+        unimplemented!()
+    }
 
     #[test]
-    fn returns_err_if_not_a_fat_partition() { unimplemented!() }
+    fn returns_err_if_not_a_fat_partition() {
+        unimplemented!()
+    }
 
     #[test]
-    fn has_correct_is_mounted() { unimplemented!() }
+    fn has_correct_is_mounted() {
+        unimplemented!()
+    }
 
     #[test]
-    fn has_correct_size() { unimplemented!() }
+    fn has_correct_size() {
+        unimplemented!()
+    }
 
     #[test]
-    fn has_working_mmap() { unimplemented!() }
+    fn has_working_mmap() {
+        unimplemented!()
+    }
 }

@@ -1,5 +1,5 @@
-use crate::lohi::LoHi;
 use crate::fat::FatTableIndex;
+use crate::lohi::LoHi;
 
 #[repr(C)]
 pub union FatPseudoDentry {
@@ -21,27 +21,21 @@ impl FatPseudoDentry {
     pub fn is_long_file_name(&self) -> bool {
         // SAFETY: attrs field is in the same position for both FatDentry and LongFileName,
         // so this is safe
-        unsafe {
-            self.long_file_name.attrs & 0x0F != 0
-        }
+        unsafe { self.long_file_name.attrs & 0x0F != 0 }
     }
 
     /// True iff self is invalid but the directory might more valid dentries
     pub fn is_invalid(&self) -> bool {
         // SAFETY: the first byte is used to mark invalid entries both for dentries and
         // LFN entries, so this is safe
-        unsafe {
-            self.long_file_name.sequence_no == 0xE5
-        }
+        unsafe { self.long_file_name.sequence_no == 0xE5 }
     }
 
     /// True iff self is invalid and the directory contains no more valid dentries
     pub fn is_dir_table_end(&self) -> bool {
         // SAFETY: we misuse `sequence_no` to check the first byte, regardless of
         // whether it's a dentry or LFN entry
-        unsafe {
-            self.long_file_name.sequence_no == 0x00
-        }
+        unsafe { self.long_file_name.sequence_no == 0x00 }
     }
 
     pub fn should_be_ignored(&self) -> bool {
@@ -145,7 +139,9 @@ impl LongFileName {
 
     // TODO handle Errors
     pub fn to_utf8_string(self) -> String {
-        std::char::decode_utf16(self.to_utf16_string()).map(|utf16_char| utf16_char.unwrap()).collect()
+        std::char::decode_utf16(self.to_utf16_string())
+            .map(|utf16_char| utf16_char.unwrap())
+            .collect()
     }
 
     // By the standard, long file names are encoded in UCS-2. However, the Linux implementation

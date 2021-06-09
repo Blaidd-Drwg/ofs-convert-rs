@@ -1,26 +1,27 @@
 #![allow(dead_code)]
 #![feature(step_trait)]
 
-mod stream_archiver;
 mod allocator;
-mod ranges;
-mod partition;
-mod fat;
-mod ext4;
-mod lohi;
-mod util;
 mod c_wrapper;
+mod ext4;
+mod fat;
+mod lohi;
+mod partition;
+mod ranges;
+mod stream_archiver;
+mod util;
 // mod allocator;
-
-use crate::partition::Partition;
-use crate::fat::FsTreeSerializer;
-use crate::ext4::SuperBlock;
-use crate::ranges::Ranges;
-use crate::c_wrapper::{c_initialize, c_start_writing, c_end_writing};
 
 use std::env::args;
 use std::io;
+
 use static_assertions::const_assert;
+
+use crate::c_wrapper::{c_end_writing, c_initialize, c_start_writing};
+use crate::ext4::SuperBlock;
+use crate::fat::FsTreeSerializer;
+use crate::partition::Partition;
+use crate::ranges::Ranges;
 
 // u32 must fit into usize
 const_assert!(std::mem::size_of::<usize>() >= std::mem::size_of::<u32>());

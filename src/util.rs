@@ -1,4 +1,4 @@
-/// Extension trait for a convenience method which transmutes a slice to a slice of another type 
+/// Extension trait for a convenience method which transmutes a slice to a slice of another type
 /// while ensuring correct alignment and size.
 pub trait ExactAlign {
     /// SAFETY: See the documentation for `slice::align_to`

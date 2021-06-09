@@ -1,0 +1,25 @@
+max_width = 120
+blank_lines_upper_bound = 2
+newline_style = "Native"
+use_field_init_shorthand = true
+# use_small_heuristics = "Max"  # worth a try?
+
+# unstable
+unstable_features = true  # lol
+wrap_comments = true
+comment_width = 120
+format_strings = true
+imports_granularity = "Module"
+group_imports = "StdExternalCrate"
+normalize_comments = true
+# version = "Two"  # what does this change?
+
+# undocumented version 2 features?
+where_single_line = true
+chain_width = 80
+array_width = 100
+fn_call_width = 80
+struct_lit_width = 50
+# struct_variant_width
+# attr_fn_like_width
+# single_line_if_else_max_width

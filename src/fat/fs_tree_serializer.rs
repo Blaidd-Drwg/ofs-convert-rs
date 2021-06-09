@@ -1,13 +1,14 @@
-use crate::fat::{FatDentry, FatPartition, FatFile, ROOT_FAT_IDX, ClusterIdx};
-use crate::stream_archiver::{StreamArchiver, Reader};
-use crate::c_wrapper::{c_build_directory, c_build_regular_file, c_finalize_directory, DentryWritePosition};
-use crate::allocator::Allocator;
-use crate::ranges::Ranges;
-
-use chrono::prelude::*;
 use std::convert::{TryFrom, TryInto};
 use std::ops::Range;
 use std::rc::Rc;
+
+use chrono::prelude::*;
+
+use crate::allocator::Allocator;
+use crate::c_wrapper::{c_build_directory, c_build_regular_file, c_finalize_directory, DentryWritePosition};
+use crate::fat::{ClusterIdx, FatDentry, FatFile, FatPartition, ROOT_FAT_IDX};
+use crate::ranges::Ranges;
+use crate::stream_archiver::{Reader, StreamArchiver};
 
 
 type Timestamp = u32;
@@ -19,9 +20,11 @@ enum FileType {
 }
 
 pub struct FsTreeSerializer<'a> {
-    allocator: Rc<Allocator<'a>>, // Rc to be shared with `self.stream_archiver` and nobody else, otherwise `into_deserializer` will panic
+    allocator: Rc<Allocator<'a>>, /* Rc to be shared with `self.stream_archiver` and nobody else, otherwise
+                                   * `into_deserializer` will panic */
     stream_archiver: StreamArchiver<'a>,
-    forbidden_ranges: Ranges<ClusterIdx>, // ranges that cannot contain any data as they will be overwritten with ext4 metadata
+    forbidden_ranges: Ranges<ClusterIdx>, /* ranges that cannot contain any data as they will be overwritten with
+                                           * ext4 metadata */
 }
 
 /// A slimmed down representation of the relevant components of a FAT dentry for serialization
@@ -130,7 +133,11 @@ impl<'a> FsTreeSerializer<'a> {
         }
     }
 
-    fn copy_range_to_unforbidden(&self, mut range: Range<ClusterIdx>, partition: &FatPartition) -> Vec<Range<ClusterIdx>> {
+    fn copy_range_to_unforbidden(
+        &self,
+        mut range: Range<ClusterIdx>,
+        partition: &FatPartition,
+    ) -> Vec<Range<ClusterIdx>> {
         let mut copied_fragments = Vec::new();
         while !range.is_empty() {
             let allocated = self.allocator.allocate(range.len());
@@ -139,7 +146,7 @@ impl<'a> FsTreeSerializer<'a> {
                 let old_cluster = partition.data_cluster(old_data_cluster_idx);
                 self.allocator.cluster_mut(new_cluster_idx).copy_from_slice(old_cluster);
             }
-            copied_fragments.push(ClusterIdx::from(allocated.start) .. ClusterIdx::from(allocated.end));
+            copied_fragments.push(ClusterIdx::from(allocated.start)..ClusterIdx::from(allocated.end));
             range.start += allocated.count() as u32;
         }
         copied_fragments
@@ -178,20 +185,27 @@ impl<'a> FsTreeDeserializer<'a> {
         unsafe {
             let file_type = self.reader.next::<FileType>()[0];
             match file_type {
-                FileType::Directory(child_count) => self.deserialize_directory(parent_dentry_write_position, child_count),
+                FileType::Directory(child_count) => {
+                    self.deserialize_directory(parent_dentry_write_position, child_count)
+                }
                 FileType::RegularFile => self.deserialize_regular_file(parent_dentry_write_position),
             }
         }
     }
 
-    unsafe fn deserialize_directory(&mut self, parent_dentry_write_position: &mut DentryWritePosition, child_count: u32) {
+    unsafe fn deserialize_directory(
+        &mut self,
+        parent_dentry_write_position: &mut DentryWritePosition,
+        child_count: u32,
+    ) {
         let dentry = self.reader.next::<FatDentry>()[0];
         let name = String::from_utf8(self.reader.next::<u8>()).unwrap();
+        #[rustfmt::skip]
         let mut dentry_write_position = c_build_directory(
             dentry,
             name,
             parent_dentry_write_position,
-            &mut || u32::from(self.allocator.allocate_one())
+            &mut || u32::from(self.allocator.allocate_one()),
         );
         for _ in 0..child_count {
             self.deserialize_file(&mut dentry_write_position);
@@ -203,12 +217,13 @@ impl<'a> FsTreeDeserializer<'a> {
         let dentry = self.reader.next::<FatDentry>()[0];
         let name = String::from_utf8(self.reader.next::<u8>()).unwrap();
         let extents = self.reader.next::<Range<ClusterIdx>>();
+        #[rustfmt::skip]
         c_build_regular_file(
             dentry,
             name,
             extents,
             parent_dentry_write_position,
-            &mut || u32::from(self.allocator.allocate_one())
+            &mut || u32::from(self.allocator.allocate_one()),
         );
     }
 }

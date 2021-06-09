@@ -1,5 +1,6 @@
-use crate::fat::{ClusterIdx, FatDentry};
 use std::ops::Range;
+
+use crate::fat::{ClusterIdx, FatDentry};
 
 pub type Extent = Range<ClusterIdx>;
 

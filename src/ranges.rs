@@ -1,5 +1,5 @@
-use std::ops::Range;
 use std::iter::IntoIterator;
+use std::ops::Range;
 
 
 /// A set of non-overlapping ranges
@@ -79,7 +79,9 @@ impl<Idx: Ord + Copy> Ranges<Idx> {
         }
     }
 
-    /// Splits up a range into a Vec of subranges and a bool. Either every element in a subrange is contained in a range from `self.ranges` and the bool is true, or no element in a subrange is contained in such a range and the bool is false.
+    /// Splits up a range into a Vec of subranges and a bool. Either every element in a subrange is contained in a range
+    /// from `self.ranges` and the bool is true, or no element in a subrange is contained in such a range and the bool
+    /// is false.
     pub fn split_overlapping(&self, range: Range<Idx>) -> Vec<(Range<Idx>, bool)> {
         let mut remaining_range = range;
         let mut overlap_candidate_idx = self.first_overlap_candidate(&remaining_range);
@@ -110,23 +112,25 @@ impl<Idx: Ord + Copy> Ranges<Idx> {
         result
     }
 
-    /// Returns the index in `self.ranges` of the first range that ends at or after `range.start`. If there is none, returns `self.ranges.len()`.
+    /// Returns the index in `self.ranges` of the first range that ends at or after `range.start`. If there is none,
+    /// returns `self.ranges.len()`.
     fn first_merge_candidate(&self, range: &Range<Idx>) -> usize {
-        match self.ranges.binary_search_by_key(&range.start, |candidate| candidate.end,) {
-            Ok(result) | Err(result) => result
+        match self.ranges.binary_search_by_key(&range.start, |candidate| candidate.end) {
+            Ok(result) | Err(result) => result,
         }
     }
 
-    /// Returns the index in `self.ranges` of the first range that ends after `range.start`. If there is none, returns `self.ranges.len()`.
+    /// Returns the index in `self.ranges` of the first range that ends after `range.start`. If there is none, returns
+    /// `self.ranges.len()`.
     fn first_overlap_candidate(&self, range: &Range<Idx>) -> usize {
-        match self.ranges.binary_search_by_key(&range.start, |candidate| candidate.end,) {
+        match self.ranges.binary_search_by_key(&range.start, |candidate| candidate.end) {
             Ok(result) => result + 1, // `self.ranges[result]` ends 1 before `range` start, so we want the next range
             Err(result) => result,
         }
     }
 }
 
-impl<'a, Idx: Ord+Copy> IntoIterator for &'a Ranges<Idx> {
+impl<'a, Idx: Ord + Copy> IntoIterator for &'a Ranges<Idx> {
     type Item = &'a Range<Idx>;
     type IntoIter = std::slice::Iter<'a, Range<Idx>>;
     fn into_iter(self) -> Self::IntoIter {
@@ -226,6 +230,9 @@ mod tests {
     #[test]
     fn split_overlapping_long() {
         let mut ranges = Ranges { ranges: vec![0..2, 6..9, 11..14] };
-        assert_eq!(ranges.split_overlapping(0..19), vec![(0..2, true), (2..6, false), (6..9, true), (9..11, false), (11..14, true), (14..19, false)]);
+        assert_eq!(
+            ranges.split_overlapping(0..19),
+            vec![(0..2, true), (2..6, false), (6..9, true), (9..11, false), (11..14, true), (14..19, false)]
+        );
     }
 }
