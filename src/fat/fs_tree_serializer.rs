@@ -73,26 +73,29 @@ impl<'a> FsTreeSerializer<'a> {
     }
 
     pub fn serialize_directory_tree(&mut self, partition: &FatPartition) {
-        unsafe {
-            let root_child_count = partition.dir_content_iter(ROOT_FAT_IDX).count();
-            self.archive_root_child_count(root_child_count.try_into().unwrap());
+        // SAFETY: safe because `ROOT_FAT_IDX` belongs to the root directory
+        let root_child_count = unsafe { partition.dir_content_iter(ROOT_FAT_IDX).count() };
+        self.archive_root_child_count(root_child_count.try_into().unwrap());
 
-            for file in partition.dir_content_iter(ROOT_FAT_IDX) {
-                if file.dentry.is_dir() {
-                    self.serialize_directory(file, partition);
-                } else {
-                    self.archive_file(file, partition);
-                }
+        // SAFETY: safe because `ROOT_FAT_IDX` belongs to the root directory
+        for file in unsafe { partition.dir_content_iter(ROOT_FAT_IDX) } {
+            if file.dentry.is_dir() {
+                self.serialize_directory(file, partition);
+            } else {
+                self.archive_file(file, partition);
             }
         }
     }
 
-    unsafe fn serialize_directory(&mut self, file: FatFile, partition: &FatPartition) {
+    fn serialize_directory(&mut self, file: FatFile, partition: &FatPartition) {
+        assert!(file.dentry.is_dir());
         let first_fat_idx = file.dentry.first_fat_index();
-        let child_count = partition.dir_content_iter(first_fat_idx).count();
+        // SAFETY: safe because `first_fat_index` belongs to a directory
+        let child_count = unsafe { partition.dir_content_iter(first_fat_idx).count() };
         self.archive_directory(file, child_count.try_into().unwrap());
 
-        for file in partition.dir_content_iter(first_fat_idx) {
+        // SAFETY: safe because `first_fat_index` belongs to a directory
+        for file in unsafe { partition.dir_content_iter(first_fat_idx) } {
             if file.dentry.is_dir() {
                 self.serialize_directory(file, partition);
             } else {
@@ -140,14 +143,15 @@ impl<'a> FsTreeSerializer<'a> {
     ) -> Vec<Range<ClusterIdx>> {
         let mut copied_fragments = Vec::new();
         while !range.is_empty() {
-            let allocated = self.allocator.allocate(range.len());
-            for (old_cluster_idx, new_cluster_idx) in range.clone().zip(allocated.clone()) {
+            let mut allocated = self.allocator.allocate(range.len());
+            let allocated_len = allocated.len();
+            for (old_cluster_idx, mut new_cluster_idx) in range.clone().zip(allocated.iter_mut()) {
                 let old_data_cluster_idx = partition.cluster_idx_to_data_cluster_idx(old_cluster_idx).unwrap();
                 let old_cluster = partition.data_cluster(old_data_cluster_idx);
-                self.allocator.cluster_mut(new_cluster_idx).copy_from_slice(old_cluster);
+                self.allocator.cluster_mut(&mut new_cluster_idx).copy_from_slice(old_cluster);
             }
-            copied_fragments.push(ClusterIdx::from(allocated.start)..ClusterIdx::from(allocated.end));
-            range.start += allocated.count() as u32;
+            range.start += allocated_len as u32;
+            copied_fragments.push(allocated.into());
         }
         copied_fragments
     }
@@ -174,7 +178,7 @@ impl<'a> FsTreeDeserializer<'a> {
     }
 
     pub fn read_root_child_count(&mut self) -> u32 {
-        if let FileType::Directory(child_count) = unsafe { self.reader.next::<FileType>()[0] } {
+        if let FileType::Directory(child_count) = self.reader.next::<FileType>()[0] {
             child_count
         } else {
             panic!("First StreamArchiver entry is not root directory child count");
@@ -182,22 +186,14 @@ impl<'a> FsTreeDeserializer<'a> {
     }
 
     pub fn deserialize_file(&mut self, parent_dentry_write_position: &mut DentryWritePosition) {
-        unsafe {
-            let file_type = self.reader.next::<FileType>()[0];
-            match file_type {
-                FileType::Directory(child_count) => {
-                    self.deserialize_directory(parent_dentry_write_position, child_count)
-                }
-                FileType::RegularFile => self.deserialize_regular_file(parent_dentry_write_position),
-            }
+        let file_type = self.reader.next::<FileType>()[0];
+        match file_type {
+            FileType::Directory(child_count) => self.deserialize_directory(parent_dentry_write_position, child_count),
+            FileType::RegularFile => self.deserialize_regular_file(parent_dentry_write_position),
         }
     }
 
-    unsafe fn deserialize_directory(
-        &mut self,
-        parent_dentry_write_position: &mut DentryWritePosition,
-        child_count: u32,
-    ) {
+    fn deserialize_directory(&mut self, parent_dentry_write_position: &mut DentryWritePosition, child_count: u32) {
         let dentry = self.reader.next::<FatDentry>()[0];
         let name = String::from_utf8(self.reader.next::<u8>()).unwrap();
         #[rustfmt::skip]
@@ -213,7 +209,7 @@ impl<'a> FsTreeDeserializer<'a> {
         c_finalize_directory(&mut dentry_write_position);
     }
 
-    unsafe fn deserialize_regular_file(&mut self, parent_dentry_write_position: &mut DentryWritePosition) {
+    fn deserialize_regular_file(&mut self, parent_dentry_write_position: &mut DentryWritePosition) {
         let dentry = self.reader.next::<FatDentry>()[0];
         let name = String::from_utf8(self.reader.next::<u8>()).unwrap();
         let extents = self.reader.next::<Range<ClusterIdx>>();

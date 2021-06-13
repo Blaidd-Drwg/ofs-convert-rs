@@ -1,10 +1,10 @@
 use std::fs::{File, OpenOptions};
 use std::io::{self, ErrorKind};
+use std::marker::PhantomData;
 use std::os::unix::fs::FileTypeExt;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::process::Command;
-use std::slice;
 
 use fs2::FileExt;
 use memmap::{MmapMut, MmapOptions};
@@ -12,11 +12,13 @@ use nix::ioctl_read;
 
 // TODO check whether file is a FAT partition? although this will be hard to check if we can't rely on fsck.fat
 // TODO macos support
-pub struct Partition {
+// TODO make file process-private through unlinking?
+pub struct Partition<'a> {
     mmap: MmapMut,
+    pub lifetime: PhantomData<&'a ()>,
 }
 
-impl Partition {
+impl<'a> Partition<'a> {
     pub fn open<P: AsRef<Path>>(partition_path: P) -> io::Result<Self> {
         let partition_path = partition_path.as_ref().canonicalize()?;
         if Self::is_mounted(partition_path.as_path())? {
@@ -28,8 +30,9 @@ impl Partition {
         file.try_lock_exclusive()?;
 
         let size = Self::get_file_size(&file)?;
+        // SAFETY: We assume that no other process is modifying the partition
         let mmap = unsafe { MmapOptions::new().len(size).map_mut(&file)? };
-        Ok(Self { mmap })
+        Ok(Self { mmap, lifetime: PhantomData })
     }
 
     pub fn len(&self) -> usize {
@@ -42,17 +45,6 @@ impl Partition {
 
     pub fn as_mut_ptr(&mut self) -> *mut u8 {
         self.mmap.as_mut_ptr()
-    }
-
-    pub fn as_slice(&self) -> &[u8] {
-        // SAFETY: TODO
-        unsafe { slice::from_raw_parts(self.mmap.as_ptr(), self.mmap.len()) }
-    }
-
-    pub fn as_mut_slice(&mut self) -> &mut [u8] {
-        // SAFETY: no aliasing because we borrow self as mut; valid length because we get
-        // it from `self.mmap`; trivially aligned because it's u8
-        unsafe { slice::from_raw_parts_mut(self.mmap.as_mut_ptr(), self.mmap.len()) }
     }
 
     fn get_file_size(file: &File) -> io::Result<usize> {
@@ -88,6 +80,7 @@ impl Partition {
     fn get_block_device_size(file: &File) -> io::Result<usize> {
         debug_assert!(file.metadata().unwrap().file_type().is_block_device());
         let mut size = 0;
+        // SAFETY: the nix crate provides no safety documentation, so we must just assume that this is safe.
         unsafe {
             match Self::block_device_size(file.as_raw_fd(), &mut size) {
                 Err(e) => Err(Self::nix_error_to_io_error(e)),

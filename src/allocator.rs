@@ -1,23 +1,27 @@
-use std::cell::{Cell, Ref, RefCell, RefMut};
-use std::convert::TryFrom;
-use std::io;
-use std::iter::Step;
+use std::cell::Cell;
+use std::marker::PhantomData;
 use std::ops::Range;
+use std::{io, slice};
 
 use crate::fat::ClusterIdx;
 use crate::ranges::{NotCoveredRange, Ranges};
 
 // TODO after reading, make directory dataclusters free
 // TODO ensure DataClusterIdx can also not be constructed
-#[derive(Clone, Copy, PartialEq, PartialOrd)]
+/// An AllocatedClusterIdx represents a cluster that was allocated by Allocator and functions as a token to access that
+/// cluster, either through the Allocator itself or through the AllocatedReader derived from it. Invariant: no two
+/// AllocatedClusterIdx can have the same value; otherwise, `Allocator::cluster_mut` might alias.
+#[derive(PartialEq, PartialOrd)]
 pub struct AllocatedClusterIdx(ClusterIdx);
 impl AllocatedClusterIdx {
-    pub fn to_ne_bytes(self) -> [u8; 4] {
-        self.0.to_ne_bytes()
+    /// SAFETY: Cloning an AllocatedClusterIdx breaks the invariant! To avoid aliasing, the caller must ensure that the
+    /// original and the clone are not used to access a cluster simultaneously.
+    pub unsafe fn clone(&self) -> Self {
+        Self(self.0)
     }
 }
 
-impl From<AllocatedClusterIdx> for u32 {
+impl From<AllocatedClusterIdx> for ClusterIdx {
     fn from(idx: AllocatedClusterIdx) -> Self {
         idx.0
     }
@@ -29,23 +33,44 @@ impl From<AllocatedClusterIdx> for usize {
     }
 }
 
-impl Step for AllocatedClusterIdx {
-    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
-        if start.0 > end.0 {
-            None
-        } else {
-            Some((end.0 - start.0) as usize)
-        }
+/// A newtype that can only be instantiated by Allocator to ensure that a range of AllocatedClusterIdx can only be used
+/// as an iterator if every cluster in that range has indeed been allocated.
+pub struct AllocatedRange(Range<AllocatedClusterIdx>);
+
+impl AllocatedRange {
+    pub fn len(&self) -> usize {
+        self.0.end.0 as usize - self.0.start.0 as usize
     }
 
-    fn forward_checked(start: Self, count: usize) -> Option<Self> {
-        let to_add = u32::try_from(count).ok()?;
-        start.0.checked_add(to_add).map(Self)
+    pub fn iter_mut(&mut self) -> AllocatedIterMut {
+        AllocatedIterMut::new(self)
     }
+}
 
-    fn backward_checked(start: Self, count: usize) -> Option<Self> {
-        let to_sub = u32::try_from(count).ok()?;
-        start.0.checked_sub(to_sub).map(Self)
+impl From<AllocatedRange> for Range<AllocatedClusterIdx> {
+    fn from(range: AllocatedRange) -> Self {
+        range.0
+    }
+}
+
+impl From<AllocatedRange> for Range<ClusterIdx> {
+    fn from(range: AllocatedRange) -> Self {
+        range.0.start.into()..range.0.end.into()
+    }
+}
+
+pub struct AllocatedIterMut<'a>(Range<ClusterIdx>, PhantomData<&'a ()>);
+impl<'a> AllocatedIterMut<'a> {
+    fn new(range: &'a mut AllocatedRange) -> Self {
+        let range = range.0.start.0..range.0.end.0;
+        Self(range, PhantomData)
+    }
+}
+
+impl Iterator for AllocatedIterMut<'_> {
+    type Item = AllocatedClusterIdx;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(AllocatedClusterIdx)
     }
 }
 
@@ -57,8 +82,10 @@ impl Step for AllocatedClusterIdx {
 /// panics if any two clusters are borrowed at the same time, which is kinda whack tbh.
 #[derive(Debug)]
 pub struct Allocator<'a> {
-    partition_data: RefCell<&'a mut [u8]>,
-    /// the cluster that the Allocator will try to allocate next
+    partition_ptr: *mut u8,
+    partition_len: usize,
+    /// the cluster that the Allocator will try to allocate next.
+    /// Invariant: first_valid_index <= cursor <= partition_len * cluster_size
     cursor: Cell<ClusterIdx>,
     /// clusters before this index are marked as used and cannot be accessed over the methods `cluster` and
     /// `cluster_mut`
@@ -66,16 +93,27 @@ pub struct Allocator<'a> {
     /// clusters that will not be allocated
     used_ranges: Ranges<ClusterIdx>,
     cluster_size: usize,
+    _lifetime: PhantomData<&'a ()>,
 }
 
 impl<'a> Allocator<'a> {
-    pub fn new(partition_data: &'a mut [u8], cluster_size: usize, used_ranges: Ranges<ClusterIdx>) -> Self {
+    /// SAFETY: Instantiating more than one Allocator can lead to undefined behavior, as mixing AllocatedClusterIdx
+    /// allocated by different Allocators can lead to aliasing
+    pub unsafe fn new(
+        partition_ptr: *mut u8,
+        partition_len: usize,
+        cluster_size: usize,
+        used_ranges: Ranges<ClusterIdx>,
+        _lifetime: PhantomData<&'a ()>,
+    ) -> Self {
         Self {
-            partition_data: RefCell::new(partition_data),
+            partition_ptr,
+            partition_len,
             cursor: Cell::new(0),
             first_valid_index: 0,
             used_ranges,
             cluster_size,
+            _lifetime,
         }
     }
 
@@ -88,69 +126,79 @@ impl<'a> Allocator<'a> {
     /// clusters that could have been allocated by `self` but were not yet allocated.
     pub fn split_into_reader(self) -> (AllocatedReader<'a>, Self) {
         let cursor_byte = self.cursor.get() as usize * self.cluster_size;
-        let (allocated, free) = self.partition_data.take().split_at_mut(cursor_byte);
         // TODO free ranges used for FAT dentries
 
         let reader = AllocatedReader {
-            partition_data: allocated,
+            partition_ptr: self.partition_ptr,
+            partition_len: cursor_byte,
             cluster_size: self.cluster_size,
+            _lifetime: self._lifetime,
         };
 
+        // SAFETY: safe since the `partition_len` bytes after `partition_ptr` are valid memory and because of the
+        // invariant `cursor_byte <= partition_len`, the `new_partition_len` bytes after `new_partition_ptr` are valid
+        // memory as well.
+        let new_partition_ptr = unsafe { self.partition_ptr.add(cursor_byte) };
+        let new_partition_len = self.partition_len - cursor_byte;
+
         let allocator = Self {
-            partition_data: RefCell::new(free),
+            partition_ptr: new_partition_ptr,
+            partition_len: new_partition_len,
             first_valid_index: self.cursor.get(),
             cursor: self.cursor,
             used_ranges: self.used_ranges,
             cluster_size: self.cluster_size,
+            _lifetime: self._lifetime,
         };
 
         (reader, allocator)
     }
 
-    pub fn allocate_one(&mut self) -> AllocatedClusterIdx {
-        self.allocate(1).start
+    pub fn allocate_one(&self) -> AllocatedClusterIdx {
+        Range::from(self.allocate(1)).start
     }
 
     /// Returns a cluster range that may be exclusively used by the caller with 1 <= `range.len()` <= `max_length`.
     // TODO error handling
-    pub fn allocate(&self, max_length: usize) -> Range<AllocatedClusterIdx> {
+    pub fn allocate(&self, max_length: usize) -> AllocatedRange {
         let free_range = self
             .find_next_free_range(self.cursor.get())
             .expect("Oh no, no more free blocks :(((");
         let range_end = free_range.end.min(free_range.start + max_length as u32);
         self.cursor.set(range_end);
-        AllocatedClusterIdx(free_range.start)..AllocatedClusterIdx(range_end)
+        AllocatedRange(AllocatedClusterIdx(free_range.start)..AllocatedClusterIdx(range_end))
     }
 
-    pub fn cluster(&'a self, idx: AllocatedClusterIdx) -> Ref<'a, [u8]> {
+    pub fn cluster(&'a self, idx: &AllocatedClusterIdx) -> &[u8] {
         let start_byte = self
             .cluster_start_byte(idx)
             .expect("Attempted to access an allocated cluster that has been made invalid");
-        Ref::map(self.partition_data.borrow(), |data| {
-            &data[start_byte..start_byte + self.cluster_size]
-        })
+        assert!(start_byte + self.cluster_size < self.partition_len);
+        // SAFETY: The data is valid and since `idx` is unique and we borrowed it, nobody else can mutate the data.
+        unsafe { slice::from_raw_parts(self.partition_ptr.add(start_byte), self.cluster_size) }
     }
 
-    pub fn cluster_mut(&self, idx: AllocatedClusterIdx) -> RefMut<[u8]> {
+    pub fn cluster_mut(&self, idx: &mut AllocatedClusterIdx) -> &mut [u8] {
         let start_byte = self
             .cluster_start_byte(idx)
             .expect("Attempted to access an allocated cluster that has been made invalid");
-        RefMut::map(self.partition_data.borrow_mut(), |data| {
-            &mut data[start_byte..start_byte + self.cluster_size]
-        })
+        assert!(start_byte + self.cluster_size < self.partition_len);
+        // SAFETY: The data is valid and since `idx` is unique and we borrowed it mutably, nobody else can access the
+        // data.
+        unsafe { slice::from_raw_parts_mut(self.partition_ptr.add(start_byte), self.cluster_size) }
     }
 
     /// Returns the position in `self.partition_data` at which the cluster `idx` starts or None if
     /// the cluster is not in `self.partition_data`.
-    fn cluster_start_byte(&self, idx: AllocatedClusterIdx) -> Option<usize> {
-        ClusterIdx::from(idx)
+    fn cluster_start_byte(&self, idx: &AllocatedClusterIdx) -> Option<usize> {
+        idx.0
             .checked_sub(self.first_valid_index)
             .map(|relative_cluster_idx| self.cluster_size * relative_cluster_idx as usize)
     }
 
     /// Returns the next range at or after `self.cursor` that is not used, or Err if such a range does not exist.
     fn find_next_free_range(&self, cursor: u32) -> Result<Range<ClusterIdx>, io::Error> {
-        let max_cluster_idx = (self.partition_data.borrow().len() / self.cluster_size) as u32;
+        let max_cluster_idx = (self.partition_len / self.cluster_size) as u32;
         let non_used_range = self.used_ranges.next_not_covered(cursor);
         let non_used_range = match non_used_range {
             NotCoveredRange::Bounded(range) => range,
@@ -171,13 +219,18 @@ impl<'a> Allocator<'a> {
 
 // no first_valid_index because in our use case it's always 0
 pub struct AllocatedReader<'a> {
-    partition_data: &'a [u8],
+    partition_ptr: *const u8,
+    partition_len: usize,
     cluster_size: usize,
+    _lifetime: PhantomData<&'a ()>,
 }
 
 impl<'a> AllocatedReader<'a> {
     pub fn cluster(&self, idx: AllocatedClusterIdx) -> &'a [u8] {
         let start_byte = self.cluster_size * usize::from(idx);
-        &self.partition_data[start_byte..start_byte + self.cluster_size]
+        assert!(start_byte + self.cluster_size <= self.partition_len);
+        // SAFETY: The data is valid and since `idx` is unique and we borrowed it mutably, nobody else can mutate the
+        // data.
+        unsafe { slice::from_raw_parts(self.partition_ptr.add(start_byte), self.cluster_size) }
     }
 }

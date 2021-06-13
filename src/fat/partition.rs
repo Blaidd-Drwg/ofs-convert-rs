@@ -1,6 +1,8 @@
 use std::convert::TryFrom;
+use std::marker::PhantomData;
 use std::mem::size_of;
 use std::ops::Range;
+use std::slice;
 
 use crate::allocator::Allocator;
 use crate::ext4::Ext4Partition;
@@ -16,47 +18,72 @@ use crate::util::ExactAlign;
 pub struct FatPartition<'a> {
     boot_sector: &'a BootSector,
     fat_table: &'a [FatTableIndex],
-    data: &'a [u8],
+    data_ptr: *const u8,
+    data_len: usize,
+    _lifetime: PhantomData<&'a ()>,
 }
 
 impl<'a> FatPartition<'a> {
-    /// SAFETY: Safety is only guaranteed if `partition_data` is a consistent FAT32 partition.
-    pub unsafe fn new(partition_data: &'a [u8]) -> Self {
-        let (bs_bytes, data_after_boot_sector) = partition_data.split_at(size_of::<BootSector>());
-        let boot_sector = &*(bs_bytes as *const [u8] as *const BootSector);
+    /// SAFETY: The caller must guarantee that:
+    /// - the `partition_len` bytes starting at `partition_ptr` are all valid memory;
+    /// - this memory will remain valid for the lifetime 'a;
+    /// - this memory represents a consistent FAT partition;
+    /// - no pointer to one of the sections used by the FAT partition (i.e. the boot sector, the FAT table(s), and any
+    ///   cluster that is not marked as free in the FAT table) will be dereferenced during the lifetime 'a.
+    pub unsafe fn new(partition_ptr: *mut u8, partition_len: usize, _lifetime: PhantomData<&'a ()>) -> Self {
+        assert!(size_of::<BootSector>() <= partition_len);
+        let boot_sector = &*(partition_ptr as *const BootSector);
 
         let fat_table_range = boot_sector.get_fat_table_range();
-
-        let relative_fat_table_start = fat_table_range.start - bs_bytes.len();
-        let data_after_reserved_sectors = &data_after_boot_sector[relative_fat_table_start..];
-        let (fat_table_bytes, data_after_fat_table) = data_after_reserved_sectors.split_at(fat_table_range.len());
+        assert!(fat_table_range.start > size_of::<BootSector>());
+        assert!(fat_table_range.end <= partition_len);
+        let fat_table_ptr = partition_ptr.add(fat_table_range.start);
+        let fat_table_bytes = slice::from_raw_parts(fat_table_ptr, fat_table_range.len());
         let fat_table = fat_table_bytes.exact_align_to::<FatTableIndex>();
 
-        let mut data_range = boot_sector.get_data_range();
-        data_range.start -= fat_table_range.end;
-        data_range.end -= fat_table_range.end;
-        let relative_data_range = data_range;
-        let data = &data_after_fat_table[relative_data_range];
+        let data_range = boot_sector.get_data_range();
+        assert!(data_range.start > fat_table_range.end);
+        assert!(data_range.end <= partition_len);
 
-        Self { boot_sector, fat_table, data }
+        Self {
+            boot_sector,
+            fat_table,
+            data_ptr: partition_ptr.add(data_range.start),
+            data_len: data_range.len(),
+            _lifetime,
+        }
     }
 
-    pub unsafe fn new_with_allocator(partition_data: &'a mut [u8]) -> (Self, Allocator) {
-        // SAFETY: we want to borrow `partition_data` twice: immutably in FatPartition and mutably
-        // in Allocator. To avoid TODO, we divide the partition into used clusters (i.e. the
-        // reserved clusters, the FAT clusters, and the data clusters that contain data) and unused
-        // clusters (i.e. the data clusters that contain no data). FatPartition will only ever
-        // read used clusters. Allocator will only ever read and write unused clusters.
-        let partition_data_alias = unsafe { std::slice::from_raw_parts(partition_data.as_ptr(), partition_data.len()) };
-        let instance = Self::new(partition_data_alias);
-        let allocator = Allocator::new(partition_data, instance.cluster_size(), instance.used_ranges());
+    /// SAFETY: The caller must guarantee that:
+    /// - the `partition_len` bytes starting at `partition_ptr` are all valid memory;
+    /// - this memory will remain valid for the lifetime 'a;
+    /// - this memory represents a consistent FAT partition;
+    /// - no pointer to this memory will be dereferenced during the lifetime 'a.
+    pub unsafe fn new_with_allocator(
+        partition_ptr: *mut u8,
+        partition_len: usize,
+        lifetime: PhantomData<&'a ()>,
+    ) -> (Self, Allocator) {
+        // We want to borrow the partition's memory twice: immutably in FatPartition and mutably in Allocator. To avoid
+        // aliasing, we divide the partition into used clusters (i.e. the reserved clusters, the FAT clusters, and the
+        // data clusters that contain data) and unused clusters (i.e. the data clusters that contain no data).
+        // FatPartition will only ever dereference pointers to used clusters. Allocator will only ever dereference
+        // pointers to unused clusters.
+        let instance = Self::new(partition_ptr, partition_len, lifetime);
+        let allocator = Allocator::new(
+            partition_ptr,
+            partition_len,
+            instance.cluster_size(),
+            instance.used_ranges(),
+            lifetime,
+        );
         (instance, allocator)
     }
 
     pub fn into_ext4(self) -> Ext4Partition<'a> {
         let partition_data = unsafe {
             let start_ptr = self.boot_sector as *const _ as *mut u8;
-            let end_ptr = self.data.last().unwrap() as *const u8;
+            let end_ptr = self.data_ptr.add(self.data_len);
             let len = end_ptr.offset_from(start_ptr);
             std::slice::from_raw_parts_mut(start_ptr, usize::try_from(len).unwrap())
         };
@@ -78,6 +105,10 @@ impl<'a> FatPartition<'a> {
         self.boot_sector.cluster_size()
     }
 
+    pub fn dentries_per_cluster(&self) -> usize {
+        self.boot_sector.dentries_per_cluster()
+    }
+
     // TODO these conversions are a mess
     pub fn cluster_idx_to_data_cluster_idx(&self, cluster_idx: ClusterIdx) -> Result<DataClusterIdx, &str> {
         let data_cluster_idx = cluster_idx.checked_sub(self.boot_sector.first_data_cluster());
@@ -87,23 +118,18 @@ impl<'a> FatPartition<'a> {
         }
     }
 
-    // TODO assert used
     pub fn data_cluster(&self, data_cluster_idx: DataClusterIdx) -> &Cluster {
         let cluster_size = self.cluster_size();
         let start_byte = usize::from(data_cluster_idx) * cluster_size;
-        &self.data[start_byte..start_byte + cluster_size]
-    }
-
-    pub fn read_data_cluster(&self, data_cluster_idx: DataClusterIdx) -> Vec<u8> {
-        let cluster_size = self.cluster_size();
-        let start_byte = usize::try_from(data_cluster_idx).unwrap() * cluster_size;
-        self.data[start_byte..start_byte + cluster_size].to_vec()
+        assert!(start_byte + cluster_size <= self.data_len);
+        // SAFETY: safe because the memory is valid and cannot be mutated without borrowing `self` as mut.
+        unsafe { slice::from_raw_parts(self.data_ptr.add(start_byte), cluster_size) }
     }
 
     /// Given the index of a directory's first cluster, iterate over the directory's content.
     /// SAFETY: safe if `first_fat_idx` points to a cluster belonging to a directory
     pub unsafe fn dir_content_iter(&'a self, first_fat_idx: FatTableIndex) -> impl Iterator<Item = FatFile> + 'a {
-        FatFileIter::new(first_fat_idx, self, self.boot_sector().dentries_per_cluster())
+        FatFileIter::new(first_fat_idx, self)
     }
 
     /// Given a file's first FAT index, follow the FAT chain and collect all of the file's FAT indices into a list of

@@ -79,6 +79,7 @@ impl From<FatTableIndex> for u32 {
 
 
 /// An index identifying a cluster in the data section of the partition.
+// TODO unsafe: must be valid
 #[derive(PartialEq, Eq, Copy, Clone, PartialOrd, Ord)]
 pub struct DataClusterIdx(u32);
 impl DataClusterIdx {

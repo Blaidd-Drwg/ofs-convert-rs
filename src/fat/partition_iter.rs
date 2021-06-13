@@ -13,8 +13,9 @@ where I: Iterator<Item = &'a FatPseudoDentry>
 }
 
 impl<'a> FatFileIter<'a, FatPseudoDentryIter<'a, FatIdxIter<'a>>> {
-    pub fn new(start_fat_idx: FatTableIndex, partition: &'a FatPartition<'a>, dentries_per_cluster: usize) -> Self {
-        let pseudo_dentry_iter = FatPseudoDentryIter::new(start_fat_idx, partition, dentries_per_cluster);
+    /// SAFETY: safe if `start_fat_idx` belongs to a directory
+    pub unsafe fn new(start_fat_idx: FatTableIndex, partition: &'a FatPartition<'a>) -> Self {
+        let pseudo_dentry_iter = FatPseudoDentryIter::new(start_fat_idx, partition);
         Self::from_pseudo_dentry_iter(pseudo_dentry_iter, partition)
     }
 }
@@ -90,36 +91,26 @@ where I: Iterator<Item = FatTableIndex>
     current_cluster: Option<&'a [FatPseudoDentry]>,
     current_dentry_idx: usize,
     partition: &'a FatPartition<'a>,
-    dentries_per_cluster: usize,
 }
 
 impl<'a> FatPseudoDentryIter<'a, FatIdxIter<'a>> {
-    pub fn new(start_fat_idx: FatTableIndex, partition: &'a FatPartition<'a>, dentries_per_cluster: usize) -> Self {
-        unsafe {
-            let fat_idx_iter = FatIdxIter::new(start_fat_idx, partition.fat_table());
-            Self::from_cluster_iter(fat_idx_iter, partition, dentries_per_cluster)
-        }
+    /// SAFETY: Safe if `start_fat_idx` belongs to a directory
+    pub unsafe fn new(start_fat_idx: FatTableIndex, partition: &'a FatPartition<'a>) -> Self {
+        let fat_idx_iter = FatIdxIter::new(start_fat_idx, partition.fat_table());
+        Self::from_cluster_iter(fat_idx_iter, partition)
     }
 }
 
-// TODO is dentries_per_cluster necessary or is it always true because we calculate it from the same data?
-// When we fix this, also rethink unsafety
 impl<'a, I> FatPseudoDentryIter<'a, I>
 where I: Iterator<Item = FatTableIndex>
 {
-    /// SAFETY: Safe if `fat_idx_iter` iterates only over clusters belonging to a directory and if
-    /// `dentries_per_cluster` is correct.
-    pub unsafe fn from_cluster_iter(
-        fat_idx_iter: I,
-        partition: &'a FatPartition<'a>,
-        dentries_per_cluster: usize,
-    ) -> Self {
+    /// SAFETY: Safe only if `fat_idx_iter` iterates only over clusters belonging to a directory
+    pub unsafe fn from_cluster_iter(fat_idx_iter: I, partition: &'a FatPartition<'a>) -> Self {
         let mut instance = Self {
             fat_idx_iter,
             current_cluster: None,
             current_dentry_idx: 0,
             partition,
-            dentries_per_cluster,
         };
         instance.get_next_cluster();
         instance
@@ -129,7 +120,7 @@ where I: Iterator<Item = FatTableIndex>
     /// Possibly invalid or dot dir
     fn try_next(&mut self) -> Option<&'a FatPseudoDentry> {
         self.current_cluster?;
-        if self.current_dentry_idx >= self.dentries_per_cluster {
+        if self.current_dentry_idx >= self.partition.dentries_per_cluster() {
             self.get_next_cluster();
             self.current_dentry_idx = 0;
         }
@@ -144,7 +135,7 @@ where I: Iterator<Item = FatTableIndex>
             let cluster = self.partition.data_cluster(fat_idx.to_data_cluster_idx());
             // SAFETY: safe, since directory data is a sequence of pseudo-dentries
             let dentries = unsafe { cluster.exact_align_to::<FatPseudoDentry>() };
-            assert_eq!(dentries.len(), self.dentries_per_cluster);
+            assert_eq!(dentries.len(), self.partition.dentries_per_cluster());
             dentries
         });
     }

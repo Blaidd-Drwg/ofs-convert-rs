@@ -24,17 +24,15 @@ impl FatPseudoDentry {
         unsafe { self.long_file_name.attrs & 0x0F != 0 }
     }
 
-    /// True iff self is invalid but the directory might more valid dentries
+    /// True iff self is invalid but the directory might contain more valid dentries
     pub fn is_invalid(&self) -> bool {
-        // SAFETY: the first byte is used to mark invalid entries both for dentries and
-        // LFN entries, so this is safe
+        // SAFETY: the first byte is used to mark invalid entries both for dentries and LFN entries, so this is safe
         unsafe { self.long_file_name.sequence_no == 0xE5 }
     }
 
     /// True iff self is invalid and the directory contains no more valid dentries
     pub fn is_dir_table_end(&self) -> bool {
-        // SAFETY: we misuse `sequence_no` to check the first byte, regardless of
-        // whether it's a dentry or LFN entry
+        // SAFETY: we misuse `sequence_no` to check the first byte, regardless of whether it's a dentry or LFN entry
         unsafe { self.long_file_name.sequence_no == 0x00 }
     }
 
