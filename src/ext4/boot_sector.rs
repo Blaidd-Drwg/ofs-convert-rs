@@ -8,8 +8,8 @@ use uuid::Uuid;
 use crate::fat::{BootSector, ClusterIdx};
 use crate::lohi::{LoHi, LoHiMut};
 
-const EXT4_ROOT_INODE: u32 = 2;
-const EXT4_LOST_FOUND_INODE: u32 = 11;
+pub const EXT4_ROOT_INODE: u32 = 2;
+pub const EXT4_LOST_FOUND_INODE: u32 = 11;
 const EXT4_FIRST_NON_RSV_INODE: u32 = 11;
 const EXT4_MAGIC: u16 = 61267;
 const EXT4_STATE_CLEANLY_UNMOUNTED: u16 = 1;

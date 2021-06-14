@@ -1,13 +1,11 @@
 use std::convert::{TryFrom, TryInto};
 use std::ffi::c_void;
-use std::ops::Range;
 
-use crate::ext4::SuperBlock;
-use crate::fat::{BootSector, ClusterIdx, Extent, FatDentry};
+use crate::ext4::{Inode, SuperBlock, EXT4_LOST_FOUND_INODE, EXT4_ROOT_INODE};
+use crate::fat::{BootSector, Extent, FatDentry};
 
 mod ffi {
-    use crate::c_wrapper::DentryWritePosition;
-    use crate::ext4::SuperBlock;
+    use crate::ext4::{Inode, SuperBlock};
     use crate::fat::{BootSector, FatDentry};
 
     pub type AllocatorData = *mut ::std::os::raw::c_void;
@@ -17,43 +15,26 @@ mod ffi {
         #[link_name = "\u{1}_Z10initializePh16ext4_super_block11boot_sector"]
         pub fn initialize(fs_start: *mut u8, _sb: SuperBlock, _boot_sector: BootSector);
 
-        #[link_name = "\u{1}_Z13start_writingPFjPvES_"]
-        pub fn start_writing(
-            allocate_block_callback: AllocatorFunc,
-            allocator_data: AllocatorData,
-        ) -> DentryWritePosition;
+        #[link_name = "\u{1}_Z13start_writingv"]
+        pub fn start_writing();
 
-        #[link_name = "\u{1}_Z11end_writing19DentryWritePositionPFjPvES0_"]
-        pub fn end_writing(
-            dentry_write_position: DentryWritePosition,
-            allocate_block_callback: AllocatorFunc,
-            allocator_data: AllocatorData,
-        );
+        #[link_name = "\u{1}_Z11end_writingv"]
+        pub fn end_writing();
 
-        #[link_name = "\u{1}_Z18build_regular_filePK10fat_dentryPKhmR19DentryWritePositionPFjPvES6_PK10fat_extentm"]
-        pub fn build_regular_file(
-            f_dentry: *const FatDentry,
-            name: *const u8,
-            name_len: usize,
-            dentry_write_position: *mut DentryWritePosition,
-            allocate_block_callback: AllocatorFunc,
-            allocator_data: AllocatorData,
-            extents: *const Extent,
-            extent_count: usize,
-        );
+        #[link_name = "\u{1}_Z18get_existing_inodej"]
+        pub fn get_existing_inode(inode_no: u32) -> *mut Inode;
 
-        #[link_name = "\u{1}_Z15build_directoryPK10fat_dentryPKhmR19DentryWritePositionPFjPvES6_"]
-        pub fn build_directory(
-            f_dentry: *const FatDentry,
-            name: *const u8,
-            name_len: usize,
-            parent_dentry_write_position: *mut DentryWritePosition,
-            allocate_block_callback: AllocatorFunc,
-            allocator_data: AllocatorData,
-        ) -> DentryWritePosition;
+        #[link_name = "\u{1}_Z11build_inodePK10fat_dentry"]
+        pub fn build_inode(dentry: *const FatDentry) -> u32;
 
-        #[link_name = "\u{1}_Z12finalize_dirR19DentryWritePosition"]
-        pub fn finalize_dir(dentry_write_position: *mut DentryWritePosition);
+        #[link_name = "\u{1}_Z16build_root_inodev"]
+        pub fn build_root_inode();
+
+        #[link_name = "\u{1}_Z22build_lost_found_inodev"]
+        pub fn build_lost_found_inode();
+
+        #[link_name = "\u{1}_Z15register_extentPK10fat_extentjb"]
+        pub fn register_extent(ext: *const Extent, inode_no: u32, add_to_extent_tree: bool);
     }
 
     #[repr(C)]
@@ -86,18 +67,12 @@ pub unsafe fn c_initialize(partition_ptr: *mut u8, superblock: SuperBlock, boot_
     ffi::initialize(partition_ptr, superblock, boot_sector);
 }
 
-pub unsafe fn c_start_writing<F>(allocate_block_callback: &mut F) -> DentryWritePosition
-where F: FnMut() -> u32 {
-    let (allocator_callback, allocator_data) = wrap_allocator_callback(allocate_block_callback);
-    ffi::start_writing(allocator_callback, allocator_data)
-    // DentryWritePosition { inode_no: 2, block_no: 0, position_in_block: 0, block_count: 0, previous_dentry:
-    // std::ptr::null_mut() }
+pub unsafe fn c_start_writing() {
+    ffi::start_writing()
 }
 
-pub unsafe fn c_end_writing<F>(dentry_write_position: DentryWritePosition, allocate_block_callback: &mut F)
-where F: FnMut() -> u32 {
-    let (allocator_callback, allocator_data) = wrap_allocator_callback(allocate_block_callback);
-    ffi::end_writing(dentry_write_position, allocator_callback, allocator_data);
+pub unsafe fn c_end_writing() {
+    ffi::end_writing();
 }
 
 fn wrap_allocator_callback<F>(allocator_callback: &mut F) -> (ffi::AllocatorFunc, ffi::AllocatorData)
@@ -111,55 +86,41 @@ where F: FnMut() -> u32 {
     (callback_wrapper::<F>, allocator_data)
 }
 
-pub fn c_build_regular_file<F>(
-    dentry: FatDentry,
-    name: String,
-    extents: Vec<Range<ClusterIdx>>,
-    parent_dentry_write_position: &mut DentryWritePosition,
-    allocate_block_callback: &mut F,
-) where
-    F: FnMut() -> u32,
-{
-    let c_extents = to_c_extents(&extents);
-    let (allocator_callback, allocator_data) = wrap_allocator_callback(allocate_block_callback);
+pub fn c_add_extent(inode_no: u32, block_no: u32, logical_block: u32, len: u16) {
+    let extent = ffi::Extent {
+        physical_start: block_no,
+        logical_start: logical_block,
+        length: len,
+    };
     unsafe {
-        ffi::build_regular_file(
-            &dentry as *const FatDentry,
-            name.as_ptr(),
-            name.len(),
-            parent_dentry_write_position as *mut DentryWritePosition,
-            allocator_callback,
-            allocator_data,
-            c_extents.as_ptr(),
-            c_extents.len(),
-        )
+        ffi::register_extent(&extent, inode_no, true);
     }
 }
 
-pub fn c_build_directory<F>(
-    dentry: FatDentry,
-    name: String,
-    parent_dentry_write_position: &mut DentryWritePosition,
-    allocate_block_callback: &mut F,
-) -> DentryWritePosition
-where
-    F: FnMut() -> u32,
-{
-    let (allocator_callback, allocator_data) = wrap_allocator_callback(allocate_block_callback);
+pub fn c_build_root_inode() -> u32 {
     unsafe {
-        ffi::build_directory(
-            &dentry as *const FatDentry,
-            name.as_ptr(),
-            name.len(),
-            parent_dentry_write_position as *mut DentryWritePosition,
-            allocator_callback,
-            allocator_data,
-        )
+        ffi::build_root_inode();
     }
+    EXT4_ROOT_INODE
 }
 
-pub fn c_finalize_directory(dentry_write_position: &mut DentryWritePosition) {
-    unsafe { ffi::finalize_dir(dentry_write_position) }
+pub fn c_build_lost_found_inode() -> u32 {
+    unsafe {
+        ffi::build_lost_found_inode();
+    }
+    EXT4_LOST_FOUND_INODE
+}
+
+pub fn c_build_inode(f_dentry: &FatDentry) -> u32 {
+    unsafe { ffi::build_inode(f_dentry as *const FatDentry) }
+}
+
+pub fn c_get_inode(inode_no: u32) -> &'static mut Inode {
+    unsafe {
+        ffi::get_existing_inode(inode_no)
+            .as_mut()
+            .expect("C returned a NULL inode pointer")
+    }
 }
 
 // TODO type conversions

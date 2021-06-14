@@ -66,9 +66,9 @@ unsafe fn ofs_convert(partition_path: &str) -> io::Result<()> {
     let mut deserializer = serializer.into_deserializer();
     let ext4_partition = fat_partition.into_ext4();
     c_initialize(ext4_partition.as_ptr() as *mut u8, superblock, boot_sector);
-    let mut dentry_write_position = c_start_writing(&mut || u32::from(deserializer.allocator.allocate_one()));
-    deserializer.deserialize_directory_tree(&mut dentry_write_position);
-    c_end_writing(dentry_write_position, &mut || u32::from(deserializer.allocator.allocate_one()));
+    c_start_writing();
+    deserializer.deserialize_directory_tree();
+    c_end_writing();
 
     // TODO write block group headers (breaks FAT)
     // TODO convert file metadata (makes ext4)

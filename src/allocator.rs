@@ -19,6 +19,12 @@ impl AllocatedClusterIdx {
     pub unsafe fn clone(&self) -> Self {
         Self(self.0)
     }
+
+    /// SAFETY: This is safe since it cannot be converted back to an `AllocatedClusterIdx` or to a `DataClusterIdx`.
+    // TODO make it so that it *actually* cannot be converted to a DataClusterIdx
+    pub fn as_cluster_idx(&self) -> ClusterIdx {
+        self.0
+    }
 }
 
 impl From<AllocatedClusterIdx> for ClusterIdx {
@@ -119,6 +125,10 @@ impl<'a> Allocator<'a> {
 
     pub fn forbid(&mut self, range: Range<ClusterIdx>) {
         self.used_ranges.insert(range);
+    }
+
+    pub fn block_size(&self) -> usize {
+        self.cluster_size
     }
 
     /// Splits the Allocator into an AllocatedReader and an Allocator: the AllocatedReader can
