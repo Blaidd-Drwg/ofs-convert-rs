@@ -117,6 +117,7 @@ impl<'a> DentryWriter<'a> {
         Self {
             inode_no,
             block_size: allocator.block_size(),
+            /// Invariant: `position_in_block <= block_size`
             position_in_block: 0,
             allocator,
             block,
@@ -132,14 +133,18 @@ impl<'a> DentryWriter<'a> {
 
         let name = dentry.serialize_name();
         let block = self.allocator.cluster_mut(&mut self.block);
+        // SAFETY: Safe because by the invariant on `position_in_block` this still points inside the block.
         let dentry_ptr = unsafe { block.as_mut_ptr().add(self.position_in_block) as *mut Ext4DentrySized };
+        // SAFETY: Safe because we made sure that the remaining space is sufficient for the entire dentry. Further,
+        // `block` is 4-aligned and `dentry.dentry_len` is always a multiple of 4, so `dentry_ptr` is 4-aligned.
         unsafe {
-            dentry_ptr.write_unaligned(dentry.inner);
+            dentry_ptr.write(dentry.inner);
             let name_ptr = dentry_ptr.add(1) as *mut u8;
             name_ptr.copy_from_nonoverlapping(name.as_ptr(), name.len());
         }
 
         self.position_in_block += dentry.dentry_len() as usize;
+        // SAFETY: It's the pointer we just wrote to, so it's valid, aligned and initialized.
         self.previous_dentry = unsafe { Some(&mut *dentry_ptr) };
     }
 
@@ -150,7 +155,7 @@ impl<'a> DentryWriter<'a> {
     fn allocate_block(&mut self) {
         let remaining_space = self.remaining_space();
         if let Some(previous_dentry) = self.previous_dentry.as_mut() {
-            previous_dentry.dentry_len += remaining_space as u16;
+            previous_dentry.increment_dentry_len(remaining_space as u16);
         }
 
         self.block = self.allocator.allocate_one();
@@ -168,7 +173,7 @@ impl Drop for DentryWriter<'_> {
     fn drop(&mut self) {
         let remaining_space = self.remaining_space();
         if let Some(previous_dentry) = self.previous_dentry.as_mut() {
-            previous_dentry.dentry_len += remaining_space as u16;
+            previous_dentry.increment_dentry_len(remaining_space as u16);
         }
     }
 }

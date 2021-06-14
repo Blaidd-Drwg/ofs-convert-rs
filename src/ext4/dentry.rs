@@ -11,7 +11,8 @@ pub struct Ext4Dentry {
 #[repr(C, packed)]
 pub struct Ext4DentrySized {
     inode_no: u32,
-    pub dentry_len: u16,
+    /// Always a multiple of 4 to ensure alignment
+    dentry_len: u16,
     name_len: u16,
 }
 
@@ -30,6 +31,13 @@ impl Ext4Dentry {
 
     pub fn dentry_len(&self) -> u16 {
         self.inner.dentry_len
+    }
+}
+
+impl Ext4DentrySized {
+    pub fn increment_dentry_len(&mut self, dentry_len: u16) {
+        assert!(dentry_len % 4 == 0);
+        self.dentry_len += dentry_len;
     }
 }
 
