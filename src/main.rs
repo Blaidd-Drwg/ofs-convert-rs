@@ -8,7 +8,7 @@ mod fat;
 mod lohi;
 mod partition;
 mod ranges;
-mod stream_archiver;
+mod serialization;
 mod util;
 // mod allocator;
 
@@ -19,9 +19,9 @@ use static_assertions::const_assert;
 
 use crate::c_wrapper::{c_end_writing, c_initialize, c_start_writing};
 use crate::ext4::SuperBlock;
-use crate::fat::FsTreeSerializer;
 use crate::partition::Partition;
 use crate::ranges::Ranges;
+use crate::serialization::FatTreeSerializer;
 
 // u32 must fit into usize
 const_assert!(std::mem::size_of::<usize>() >= std::mem::size_of::<u32>());
@@ -60,7 +60,7 @@ unsafe fn ofs_convert(partition_path: &str) -> io::Result<()> {
         allocator.forbid(range.clone());
     }
 
-    let mut serializer = FsTreeSerializer::new(allocator, fat_partition.cluster_size() as usize, forbidden_ranges);
+    let mut serializer = FatTreeSerializer::new(allocator, fat_partition.cluster_size() as usize, forbidden_ranges);
     serializer.serialize_directory_tree(&fat_partition);
 
     let mut deserializer = serializer.into_deserializer();
