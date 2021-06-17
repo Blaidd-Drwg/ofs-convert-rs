@@ -2,7 +2,6 @@
 #include "ext4_bg.h"
 #include "partition.h"
 #include "visualizer.h"
-#include "tree_builder.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -19,5 +18,4 @@ void start_writing() {
 
 void end_writing() {
     finalize_block_groups_on_disk();
-    // visualizer_render_to_file("partition.svg", partition.size / meta_info.cluster_size);
 }

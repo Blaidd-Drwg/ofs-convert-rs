@@ -1,4 +1,3 @@
-#include "extent-allocator.h"
 #include "ext4.h"
 #include "ext4_bg.h"
 #include "ext4_extent.h"
@@ -26,19 +25,6 @@ ext4_extent to_ext4_extent(const fat_extent *fext) {
     return eext;
 }
 
-uint16_t max_entries() {
-    return (block_size() - sizeof(ext4_extent_header)) / sizeof(ext4_extent);
-}
-
-bool append_in_block(ext4_extent_header *header, ext4_extent *ext) {
-    if (header->eh_entries >= header->eh_max) return false;
-
-    ext4_extent *new_entry = (ext4_extent *) (header + header->eh_entries + 1);
-    memcpy(new_entry, ext, sizeof *ext);
-    header->eh_entries++;
-    return true;
-}
-
 void register_extent(uint64_t extent_start_block, uint64_t extent_len, uint32_t inode_no) {
     ext4_inode *inode = &get_existing_inode(inode_no);
 
@@ -46,16 +32,4 @@ void register_extent(uint64_t extent_start_block, uint64_t extent_len, uint32_t 
     incr_lo_hi(inode->i_blocks_lo, inode->l_i_blocks_high, block_count);
 
     add_extent_to_block_bitmap(extent_start_block, extent_start_block + extent_len);
-}
-
-ext4_extent last_extent(uint32_t inode_number) {
-    ext4_inode *inode = &get_existing_inode(inode_number);
-    ext4_extent_header *header = &(inode->ext_header);
-
-    while(header->eh_depth) {
-        ext4_extent_idx *last_idx = (ext4_extent_idx *) (header + header->eh_entries);
-        header = (ext4_extent_header *) block_start(from_lo_hi(last_idx->ei_leaf_lo, last_idx->ei_leaf_hi));
-    }
-
-    return *(ext4_extent *) (header + header->eh_entries);
 }

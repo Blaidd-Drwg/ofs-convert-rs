@@ -24,58 +24,8 @@ uint32_t e4blk_to_fat_cl(uint64_t block_no) {
     return (cluster_no < FAT_START_INDEX) ? 0 : static_cast<uint32_t >(cluster_no);
 }
 
-uint32_t *fat_entry(uint32_t cluster_no) {
-    return meta_info.fat_start + cluster_no;
-}
-
-uint8_t *cluster_start(uint32_t cluster_no) {
-    return meta_info.data_start + (cluster_no - FAT_START_INDEX) * static_cast<uint64_t>(meta_info.cluster_size);
-}
-
-bool is_free_cluster(uint32_t cluster_entry) {
-    return (cluster_entry & CLUSTER_ENTRY_MASK) == FREE_CLUSTER;
-}
-
-uint32_t file_cluster_no(struct fat_dentry *dentry) {
-    uint16_t low = dentry->first_cluster_low;
-    uint32_t high = dentry->first_cluster_high << 16;
-    return high | low;
-}
-
 bool is_dir(const struct fat_dentry *dentry) {
     return dentry->attrs & 0x10;
-}
-
-bool is_lfn(struct fat_dentry *dentry) {
-    return dentry->attrs & 0x0F;
-}
-
-bool is_invalid(struct fat_dentry *dentry) {
-    return *(uint8_t *) dentry == 0xE5;
-}
-
-bool is_dir_table_end(struct fat_dentry *dentry) {
-    return !dentry || *(uint8_t *) dentry == 0x00;
-}
-
-bool is_dot_dir(struct fat_dentry *dentry) {
-    return dentry->short_name[0] == '.';
-}
-
-bool is_last_lfn_entry(struct fat_dentry *dentry) {
-    return *(uint8_t *) dentry & 0x40;
-}
-
-bool has_lower_name(struct fat_dentry *dentry) {
-    return dentry->short_name_case & 0x8;
-}
-
-bool has_lower_extension(struct fat_dentry *dentry) {
-    return dentry->short_name_case & 0x10;
-}
-
-bool has_extension(struct fat_dentry *dentry) {
-    return dentry->short_extension[0] != ' ';
 }
 
 uint32_t fat_time_to_unix(uint16_t date, uint16_t time) {
@@ -89,43 +39,6 @@ uint32_t fat_time_to_unix(uint16_t date, uint16_t time) {
     datetm.tm_min = (time & 0x7E0) >> 5;
     datetm.tm_sec = (time & 0x1F) * 2;
     return static_cast<uint32_t>(timegm(&datetm));
-}
-
-void lfn_cpy(uint16_t *dest, uint8_t *src) {
-    memcpy(dest, src + 1, 5 * sizeof(uint16_t));
-    memcpy(dest + 5, src + 14, 6 * sizeof(uint16_t));
-    memcpy(dest + 11, src + 28, 2 * sizeof(uint16_t));
-}
-
-uint8_t lfn_entry_sequence_no(struct fat_dentry *dentry) {
-    return *(uint8_t *) dentry & 0x1F;
-}
-
-void read_short_name(struct fat_dentry *dentry, uint16_t *name) {
-    bool lower_name = has_lower_name(dentry);
-    bool lower_extension = has_lower_extension(dentry);
-
-    uint8_t *n = dentry->short_name;
-    for (int i = 0; i < 8 && n[i] != ' '; i++) {
-        *name = lower_name ? tolower(n[i]) : n[i];
-        name++;
-    }
-
-    if (has_extension(dentry)) {
-        *name = '.';
-        name++;
-
-        uint8_t *e = dentry->short_extension;
-        for (int i = 0; i < 3 && e[i] != ' '; i++) {
-            *name = lower_extension ? tolower(e[i]) : e[i];
-            name++;
-        }
-    }
-    *name = 0;
-}
-
-void read_boot_sector(uint8_t *fs) {
-    boot_sector = *(struct boot_sector*) fs;
 }
 
 void set_meta_info(uint8_t *fs_start) {

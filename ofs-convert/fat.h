@@ -4,39 +4,17 @@
 #include <stdint.h>
 
 void set_meta_info(uint8_t *fs);
-void read_boot_sector(uint8_t *fs);
-void recursive_traverse(uint32_t cluster_no, uint16_t *long_name);
 
 uint64_t fat_cl_to_e4blk(uint32_t cluster_no);
 uint32_t e4blk_to_fat_cl(uint64_t block_no);
-bool is_lfn(struct fat_dentry *dentry);
 bool is_dir(const struct fat_dentry *dentry);
-bool is_invalid(struct fat_dentry *dentry);
-bool is_dir_table_end(struct fat_dentry *dentry);
-bool is_last_lfn_entry(struct fat_dentry *dentry);
-bool is_dot_dir(struct fat_dentry *dentry);
-bool has_lower_name(struct fat_dentry *dentry);
-bool has_lower_extension(struct fat_dentry *dentry);
-bool has_extension(struct fat_dentry *dentry);
-uint8_t lfn_entry_sequence_no(struct fat_dentry *dentry);
-uint32_t file_cluster_no(struct fat_dentry *dentry);
-uint32_t *fat_entry(uint32_t cluster_no);
-uint8_t *cluster_start(uint32_t cluster_no);
 uint32_t fat_time_to_unix(uint16_t date, uint16_t time);
-bool is_free_cluster(uint32_t cluster_entry);
-void lfn_cpy(uint16_t *dest, uint8_t *src);
-void read_short_name(struct fat_dentry *dentry, uint16_t *name);
 uint32_t sector_count();
 uint32_t data_cluster_count();
 void read_volume_label(uint8_t* out);
 
-
 // Index in the FAT of the first data cluster
 constexpr uint32_t FAT_START_INDEX = 2;
-constexpr uint32_t CLUSTER_ENTRY_MASK = 0x0FFFFFFF;
-constexpr uint32_t FREE_CLUSTER = 0;
-constexpr uint32_t FAT_END_OF_CHAIN = 0x0FFFFFF8;
-constexpr uint8_t LFN_ENTRY_LENGTH = 13;
 
 extern struct boot_sector boot_sector;
 extern struct meta_info meta_info;

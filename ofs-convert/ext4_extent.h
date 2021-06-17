@@ -41,6 +41,5 @@ struct ext4_extent_tail {
 
 ext4_extent_header init_extent_header();
 void register_extent(uint64_t extent_start_block, uint64_t extent_len, uint32_t inode_no);
-ext4_extent last_extent(uint32_t inode_number);
 
 #endif //OFS_EXT4_EXTENT_H
