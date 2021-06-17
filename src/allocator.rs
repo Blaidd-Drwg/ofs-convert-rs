@@ -14,6 +14,13 @@ use crate::ranges::{NotCoveredRange, Ranges};
 #[derive(PartialEq, PartialOrd)]
 pub struct AllocatedClusterIdx(ClusterIdx);
 impl AllocatedClusterIdx {
+    /// SAFETY: Instantiating an AllocatedClusterIdx breaks the invariant! To avoid aliasing, the caller must ensure
+    /// that `idx` was originally created from an `AllocatedClusterIdx` and that the original and the clone are not used
+    /// to access a cluster simultaneously.
+    pub unsafe fn new(idx: ClusterIdx) -> Self {
+        Self(idx)
+    }
+
     /// SAFETY: Cloning an AllocatedClusterIdx breaks the invariant! To avoid aliasing, the caller must ensure that the
     /// original and the clone are not used to access a cluster simultaneously.
     pub unsafe fn clone(&self) -> Self {
@@ -208,7 +215,7 @@ impl<'a> Allocator<'a> {
 
     /// Returns the next range at or after `self.cursor` that is not used, or Err if such a range does not exist.
     fn find_next_free_range(&self, cursor: u32) -> Result<Range<ClusterIdx>, io::Error> {
-        let max_cluster_idx = (self.partition_len / self.cluster_size) as u32;
+        let max_cluster_idx = self.first_valid_index + (self.partition_len / self.cluster_size) as u32;
         let non_used_range = self.used_ranges.next_not_covered(cursor);
         let non_used_range = match non_used_range {
             NotCoveredRange::Bounded(range) => range,

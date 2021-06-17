@@ -74,25 +74,6 @@ void build_lost_found(DentryWritePosition& dentry_write_position, AllocatorFunc 
     // visualizer_add_block_range({BlockRange::Ext4Dir, fat_cl_to_e4blk(lost_found_dentry_extent.physical_start), 1});
 }
 
-void register_dir_extent(uint64_t block_no, uint32_t logical_no, uint32_t inode_no) {
-    fat_extent extent = {logical_no, 1, static_cast<uint32_t>(block_no)};
-    register_extent(&extent, inode_no);
-}
-
-
-void allocate_block(DentryWritePosition& dentry_write_position, AllocatorFunc allocate_block_callback, AllocatorData allocator_data) {
-    if (dentry_write_position.previous_dentry) {
-        dentry_write_position.previous_dentry->rec_len += block_size() - dentry_write_position.position_in_block;
-    }
-
-    dentry_write_position.block_no = allocate_block_callback(allocator_data);
-    dentry_write_position.position_in_block = 0;
-    dentry_write_position.block_count++;
-    dentry_write_position.previous_dentry = NULL;
-
-    register_dir_extent(dentry_write_position.block_no, dentry_write_position.block_count - 1, dentry_write_position.inode_no);
-//    visualizer_add_block_range({BlockRange::Ext4Dir, dentry_write_position.block_no, 1});
-}
 
 uint32_t build_file(
         const fat_dentry* f_dentry,
@@ -116,27 +97,6 @@ uint32_t build_file(
     dentry_write_position.previous_dentry = dentry_space;
     free(e_dentry);
     return inode_no;
-}
-
-void build_regular_file(
-        const fat_dentry* f_dentry,
-        const uint8_t name[],
-        size_t name_len,
-        DentryWritePosition& dentry_write_position,
-        AllocatorFunc allocate_block_callback,
-        AllocatorData allocator_data,
-        const fat_extent extents[],
-        size_t extent_count
-        ) {
-    uint32_t inode_no = build_file(
-            f_dentry,
-            name,
-            name_len,
-            dentry_write_position,
-            allocate_block_callback,
-            allocator_data
-    );
-    set_extents(inode_no, f_dentry, extents, extent_count);
 }
 
 // parent_dir_inode_no

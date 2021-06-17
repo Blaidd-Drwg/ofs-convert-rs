@@ -1,6 +1,9 @@
-use crate::ext4::{HasSuperBlock, SuperBlock, GROUP_0_PADDING};
-use crate::fat::{BootSector, ClusterIdx};
-use crate::ranges::Ranges;
+use std::ops::Range;
+
+use crate::allocator::Allocator;
+use crate::c_wrapper::{c_add_extent, c_build_inode, c_build_lost_found_inode, c_build_root_inode};
+use crate::ext4::{Extent, HasSuperBlock, Inode, SuperBlock};
+use crate::fat::{BootSector, ClusterIdx, FatDentry};
 
 const FIRST_SUPERBLOCK_OFFSET: usize = 1024;
 
@@ -38,6 +41,36 @@ impl<'a> Ext4Partition<'a> {
     pub fn as_ptr(&self) -> *const u8 {
         self.start
     }
+
+    pub fn build_inode(&mut self, dentry: &FatDentry) -> Inode<'a> {
+        c_build_inode(dentry)
+    }
+
+    pub fn build_root_inode(&mut self) -> Inode<'a> {
+        c_build_root_inode()
+    }
+
+    pub fn build_lost_found_inode(&mut self) -> Inode<'a> {
+        c_build_lost_found_inode()
+    }
+
+    pub fn set_extents(&mut self, inode: &mut Inode, extents: Vec<Range<ClusterIdx>>, allocator: &Allocator<'_>) {
+        let mut logical_start = 0;
+        for extent in extents {
+            let ext_extent = Extent::new(extent, logical_start);
+            self.register_extent(inode, ext_extent, allocator);
+            logical_start += ext_extent.len as u32;
+        }
+    }
+
+    pub fn register_extent(&mut self, inode: &mut Inode, extent: Extent, allocator: &Allocator) {
+        c_add_extent(inode.inode_no, extent.physical_start_lo, extent.len);
+
+        let additional_blocks = inode.add_extent(extent, allocator);
+        for block in additional_blocks {
+            c_add_extent(inode.inode_no, block, 1);
+        }
+    }
 }
 
 pub struct BlockGroup<'a> {
@@ -45,7 +78,7 @@ pub struct BlockGroup<'a> {
     /* gdt: Option<&'a mut [u8]>,
      * data_block_bitmap: &'a mut [u8],
      * inode_bitmap: &'a mut [u8],
-     * inode_table: &'a mut [u8],
+     * inode_table: &'a mut [InodeInner],
      * data: &'a mut [u8], */
 }
 

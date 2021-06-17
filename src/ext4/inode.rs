@@ -1,9 +1,18 @@
-use crate::ext4::{Extent, ExtentHeader};
+use crate::allocator::Allocator;
+use crate::ext4::{Extent, ExtentTree, ExtentTreeElement, ExtentTreeLevel};
+use crate::fat::ClusterIdx;
 use crate::lohi::LoHiMut;
 
+pub const EXTENT_ENTRIES_IN_INODE: usize = 5;
+
+pub struct Inode<'a> {
+    pub inode_no: u32,
+    pub inner: &'a mut InodeInner,
+}
+
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct Inode {
+#[derive(Copy, Clone)]
+pub struct InodeInner {
     pub i_mode: u16,
     pub i_uid: u16,
     pub i_size_lo: u32,
@@ -16,8 +25,7 @@ pub struct Inode {
     pub i_blocks_lo: u32,
     pub i_flags: u32,
     pub l_i_version: u32,
-    pub ext_header: ExtentHeader,
-    pub extents: [Extent; 4],
+    pub extents: [ExtentTreeElement; EXTENT_ENTRIES_IN_INODE],
     pub i_generation: u32,
     pub i_file_acl_lo: u32,
     pub i_size_high: u32,
@@ -39,17 +47,29 @@ pub struct Inode {
     pub i_projid: u32,
 }
 
-impl Inode {
+impl<'a> Inode<'a> {
     pub fn increment_size(&mut self, size: u64) {
-        let mut current_size = LoHiMut::new(&mut self.i_size_lo, &mut self.i_size_high);
+        let mut current_size = LoHiMut::new(&mut self.inner.i_size_lo, &mut self.inner.i_size_high);
         current_size += size;
     }
 
     pub fn set_size(&mut self, size: u64) {
-        LoHiMut::new(&mut self.i_size_lo, &mut self.i_size_high).set(size);
+        LoHiMut::new(&mut self.inner.i_size_lo, &mut self.inner.i_size_high).set(size);
     }
 
     pub fn increment_link_count(&mut self) {
-        self.i_links_count += 1;
+        self.inner.i_links_count += 1;
+    }
+
+    pub fn add_extent(&mut self, extent: Extent, allocator: &Allocator<'_>) -> Vec<ClusterIdx> {
+        self.extent_tree(allocator).add_extent(extent)
+    }
+
+    fn extent_tree<'b>(&'b mut self, allocator: &'b Allocator<'b>) -> ExtentTree<'b> {
+        // SAFETY: TODO
+        unsafe {
+            let root_level = ExtentTreeLevel::new(&mut self.inner.extents);
+            ExtentTree::new(root_level, allocator)
+        }
     }
 }

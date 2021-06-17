@@ -5,7 +5,7 @@ use crate::ext4::{Inode, SuperBlock, EXT4_LOST_FOUND_INODE, EXT4_ROOT_INODE};
 use crate::fat::{BootSector, Extent, FatDentry};
 
 mod ffi {
-    use crate::ext4::{Inode, SuperBlock};
+    use crate::ext4::{InodeInner, SuperBlock};
     use crate::fat::{BootSector, FatDentry};
 
     pub type AllocatorData = *mut ::std::os::raw::c_void;
@@ -22,7 +22,7 @@ mod ffi {
         pub fn end_writing();
 
         #[link_name = "\u{1}_Z18get_existing_inodej"]
-        pub fn get_existing_inode(inode_no: u32) -> *mut Inode;
+        pub fn get_existing_inode(inode_no: u32) -> *mut InodeInner;
 
         #[link_name = "\u{1}_Z11build_inodePK10fat_dentry"]
         pub fn build_inode(dentry: *const FatDentry) -> u32;
@@ -33,8 +33,8 @@ mod ffi {
         #[link_name = "\u{1}_Z22build_lost_found_inodev"]
         pub fn build_lost_found_inode();
 
-        #[link_name = "\u{1}_Z15register_extentPK10fat_extentjb"]
-        pub fn register_extent(ext: *const Extent, inode_no: u32, add_to_extent_tree: bool);
+        #[link_name = "\u{1}_Z15register_extentmmj"]
+        pub fn register_extent(extent_start_block: u64, extent_len: u64, inode_no: u32);
     }
 
     #[repr(C)]
@@ -86,40 +86,41 @@ where F: FnMut() -> u32 {
     (callback_wrapper::<F>, allocator_data)
 }
 
-pub fn c_add_extent(inode_no: u32, block_no: u32, logical_block: u32, len: u16) {
-    let extent = ffi::Extent {
-        physical_start: block_no,
-        logical_start: logical_block,
-        length: len,
-    };
+pub fn c_add_extent(inode_no: u32, extent_start: u32, len: u16) {
     unsafe {
-        ffi::register_extent(&extent, inode_no, true);
+        ffi::register_extent(extent_start as u64, len as u64, inode_no);
     }
 }
 
-pub fn c_build_root_inode() -> u32 {
+pub fn c_build_root_inode() -> Inode<'static> {
     unsafe {
         ffi::build_root_inode();
     }
-    EXT4_ROOT_INODE
+    c_get_inode(EXT4_ROOT_INODE)
 }
 
-pub fn c_build_lost_found_inode() -> u32 {
+pub fn c_build_lost_found_inode() -> Inode<'static> {
     unsafe {
         ffi::build_lost_found_inode();
     }
-    EXT4_LOST_FOUND_INODE
+    c_get_inode(EXT4_LOST_FOUND_INODE)
 }
 
-pub fn c_build_inode(f_dentry: &FatDentry) -> u32 {
-    unsafe { ffi::build_inode(f_dentry as *const FatDentry) }
-}
-
-pub fn c_get_inode(inode_no: u32) -> &'static mut Inode {
+pub fn c_build_inode(f_dentry: &FatDentry) -> Inode<'static> {
     unsafe {
-        ffi::get_existing_inode(inode_no)
-            .as_mut()
-            .expect("C returned a NULL inode pointer")
+        let inode_no = ffi::build_inode(f_dentry as *const FatDentry);
+        c_get_inode(inode_no)
+    }
+}
+
+fn c_get_inode(inode_no: u32) -> Inode<'static> {
+    unsafe {
+        Inode {
+            inode_no,
+            inner: ffi::get_existing_inode(inode_no)
+                .as_mut()
+                .expect("C returned a NULL inode pointer"),
+        }
     }
 }
 

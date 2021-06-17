@@ -14,6 +14,7 @@ mod util;
 
 use std::env::args;
 use std::io;
+use std::mem::size_of;
 
 use static_assertions::const_assert;
 
@@ -24,7 +25,7 @@ use crate::ranges::Ranges;
 use crate::serialization::FatTreeSerializer;
 
 // u32 must fit into usize
-const_assert!(std::mem::size_of::<usize>() >= std::mem::size_of::<u32>());
+const_assert!(size_of::<usize>() >= size_of::<u32>());
 
 fn main() {
     if args().len() != 2 {
@@ -64,10 +65,10 @@ unsafe fn ofs_convert(partition_path: &str) -> io::Result<()> {
     serializer.serialize_directory_tree(&fat_partition);
 
     let mut deserializer = serializer.into_deserializer();
-    let ext4_partition = fat_partition.into_ext4();
+    let mut ext4_partition = fat_partition.into_ext4();
     c_initialize(ext4_partition.as_ptr() as *mut u8, superblock, boot_sector);
     c_start_writing();
-    deserializer.deserialize_directory_tree();
+    deserializer.deserialize_directory_tree(&mut ext4_partition);
     c_end_writing();
 
     // TODO write block group headers (breaks FAT)
