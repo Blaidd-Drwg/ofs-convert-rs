@@ -38,19 +38,19 @@ impl FatTableIndex {
     }
 
     /// True if `self.0` is a special value representing the end of a FAT chain.
-    pub fn is_chain_end(&self) -> bool {
+    pub fn is_chain_end(self) -> bool {
         const FAT_END_OF_CHAIN: u32 = 0x0FFFFFF8;
         self.0 >= FAT_END_OF_CHAIN
     }
 
     /// True if `self.0` is a special value representing a file with no data.
-    pub fn is_zero_length_file(&self) -> bool {
+    pub fn is_zero_length_file(self) -> bool {
         self.0 == 0
     }
 
     // TODO move to struct FatTable
     /// True if `self.0` is a special value representing a free cluster.
-    pub fn is_free(&self) -> bool {
+    pub fn is_free(self) -> bool {
         const FREE_CLUSTER: u32 = 0;
         const CLUSTER_ENTRY_MASK: u32 = 0x0FFFFFFF;
         self.0 & CLUSTER_ENTRY_MASK == FREE_CLUSTER
@@ -67,7 +67,7 @@ impl Index<FatTableIndex> for [FatTableIndex] {
 impl TryFrom<usize> for FatTableIndex {
     type Error = std::num::TryFromIntError;
     fn try_from(idx: usize) -> Result<Self, Self::Error> {
-        Ok(FatTableIndex(u32::try_from(idx)?))
+        Ok(Self(u32::try_from(idx)?))
     }
 }
 
@@ -104,6 +104,6 @@ impl From<DataClusterIdx> for u32 {
 
 impl From<DataClusterIdx> for usize {
     fn from(idx: DataClusterIdx) -> Self {
-        idx.0 as usize
+        idx.0 as Self
     }
 }

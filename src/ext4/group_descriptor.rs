@@ -30,7 +30,7 @@ pub struct Ext4GroupDescriptor {
 }
 
 impl Ext4GroupDescriptor {
-    pub fn new(info: Ext4BlockGroupConstructionInfo) -> Ext4GroupDescriptor {
+    pub fn new(info: Ext4BlockGroupConstructionInfo) -> Self {
         let block_bitmap_block = info.start_block + info.relative_block_bitmap_block;
         let inode_bitmap_block = info.start_block + info.relative_inode_bitmap_block;
         let inode_table_start_block = info.start_block + info.relative_inode_table_start_block;

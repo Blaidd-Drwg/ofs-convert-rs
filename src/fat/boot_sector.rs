@@ -59,10 +59,10 @@ impl BootSector {
     }
 
     pub fn sector_count(&self) -> u32 {
-        if self.sector_count_1 != 0 {
-            u32::from(self.sector_count_1)
-        } else {
+        if self.sector_count_1 == 0 {
             self.sector_count_2
+        } else {
+            u32::from(self.sector_count_1)
         }
     }
 

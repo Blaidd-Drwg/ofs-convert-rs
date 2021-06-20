@@ -139,8 +139,8 @@ impl SuperBlock {
 
         // SAFETY: This allows us to skip initializing a ton of fields to zero, but
         // CAUTION: some initialization steps rely on other fields already having been set,
-        // so pay attention when refactoring/reoreding steps.
-        let mut sb: SuperBlock = unsafe { std::mem::zeroed() };
+        // so pay attention when refactoring/reordering steps.
+        let mut sb: Self = unsafe { std::mem::zeroed() };
 
         let block_size = boot_sector.cluster_size();
         if block_size < MIN_BLOCK_SIZE {
@@ -151,7 +151,7 @@ impl SuperBlock {
         }
 
         let log_block_size = (block_size as f64).log2().round() as u32;
-        if 2usize.pow(log_block_size) != block_size {
+        if 2_usize.pow(log_block_size) != block_size {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "FAT cluster size is not a power of 2",

@@ -137,7 +137,7 @@ pub struct Ext4BlockGroupConstructionInfo {
 }
 
 impl Ext4BlockGroupConstructionInfo {
-    pub fn new(superblock: SuperBlock, block_group_idx: usize) -> Self {
+    pub fn new(superblock: &SuperBlock, block_group_idx: usize) -> Self {
         let has_superblock = superblock.block_group_has_superblock(block_group_idx);
 
         let relative_block_bitmap_block = superblock.superblock_copy_overhead(has_superblock);

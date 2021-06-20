@@ -110,14 +110,14 @@ impl ExtentHeader {
         }
     }
 
-    pub fn from_child(parent: ExtentHeader, all_entry_count: u16) -> Self {
+    pub fn from_child(parent: Self, all_entry_count: u16) -> Self {
         Self {
             depth: parent.depth + 1,
             ..Self::new(all_entry_count)
         }
     }
 
-    pub fn from_parent(parent: ExtentHeader, all_entry_count: u16) -> Self {
+    pub fn from_parent(parent: Self, all_entry_count: u16) -> Self {
         Self {
             depth: parent.depth - 1,
             ..Self::new(all_entry_count)
@@ -189,7 +189,7 @@ impl<'a> ExtentTree<'a> {
 impl<'a> ExtentTreeLevel<'a> {
     /// SAFETY: Safe if the entries in `entries` form a consistent extent tree level. In particular:
     /// - `entries[0]` must be an `ExtentHeader`;
-    /// - every entry in `entries[1..header.valid_entry_count] must be either:
+    /// - every entry in `entries[1..header.valid_entry_count]` must be either:
     ///     - a valid `Extent` if `header.depth == 0`. In particular, for every entry `entry`:
     ///         - every block in `entry.as_range` must be a data block.
     ///     - a valid `ExtentIdx` if `header.depth > 0`. In particular, for every entry `entry`:

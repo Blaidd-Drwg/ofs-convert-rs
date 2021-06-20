@@ -8,7 +8,7 @@ use num::PrimInt;
 
 
 /// Sometimes for space/aligment reasons a single value is split into two smaller values which are stored non-adjacently
-/// on disk (e.g.: full value 0xBEEF into hi value 0xBE and lo value 0xEF). LoHi and LoHiMut provide an interface to
+/// on disk (e.g.: full value 0xBEEF into hi value 0xBE and lo value 0xEF). `LoHi` and `LoHiMut` provide an interface to
 /// read and write these values.
 pub struct LoHiMut<'a, Full, LoHalf, HiHalf>
 where
@@ -91,8 +91,6 @@ where
     Full: PrimInt + From<LoHalf> + From<HiHalf>,
     LoHalf: PrimInt + TryFrom<Full>,
     HiHalf: PrimInt + TryFrom<Full>,
-    LoHalf::Error: Debug,
-    HiHalf::Error: Debug,
 {
     pub lo: &'a LoHalf,
     pub hi: &'a HiHalf,
@@ -104,8 +102,6 @@ where
     Full: PrimInt + From<LoHalf> + From<HiHalf>,
     LoHalf: PrimInt + TryFrom<Full>,
     HiHalf: PrimInt + TryFrom<Full>,
-    LoHalf::Error: Debug,
-    HiHalf::Error: Debug,
 {
     const LO_HALF_BIT_COUNT: usize = size_of::<LoHalf>() * 8;
 
@@ -130,8 +126,6 @@ where
     Full: PrimInt + From<LoHalf> + From<HiHalf>,
     LoHalf: PrimInt + TryFrom<Full>,
     HiHalf: PrimInt + TryFrom<Full>,
-    LoHalf::Error: Debug,
-    HiHalf::Error: Debug,
 {
     type Output = Full;
     fn add(self, other: Full) -> Self::Output {
@@ -144,8 +138,6 @@ where
     Full: PrimInt + From<LoHalf> + From<HiHalf>,
     LoHalf: PrimInt + TryFrom<Full>,
     HiHalf: PrimInt + TryFrom<Full>,
-    LoHalf::Error: Debug,
-    HiHalf::Error: Debug,
 {
     type Output = Full;
     fn sub(self, other: Full) -> Self::Output {

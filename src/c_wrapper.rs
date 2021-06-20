@@ -68,7 +68,7 @@ pub unsafe fn c_initialize(partition_ptr: *mut u8, superblock: SuperBlock, boot_
 }
 
 pub unsafe fn c_start_writing() {
-    ffi::start_writing()
+    ffi::start_writing();
 }
 
 pub unsafe fn c_end_writing() {

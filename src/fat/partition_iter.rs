@@ -56,7 +56,7 @@ where I: Iterator<Item = &'a FatPseudoDentry>
     }
 }
 
-/// Caller must ensure that self.pseudo_dentry_iter.next() is a LongFileName
+/// Caller must ensure that `self.pseudo_dentry_iter.next()` is a `LongFileName`
 impl<'a, I> FatFileIter<'a, I>
 where I: Iterator<Item = &'a FatPseudoDentry>
 {
@@ -71,7 +71,7 @@ where I: Iterator<Item = &'a FatPseudoDentry>
             let long_file_name = self
                 .pseudo_dentry_iter
                 .next()
-                .and_then(|pseudo_dentry| pseudo_dentry.as_long_file_name())
+                .and_then(FatPseudoDentry::as_long_file_name)
                 .expect("FAT partition contains malformed LFN entry");
             file_name_components.push(long_file_name.to_utf8_string());
             lfn_entries.push(long_file_name.to_utf16_string());

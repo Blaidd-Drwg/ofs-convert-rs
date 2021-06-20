@@ -18,7 +18,7 @@ impl<'a> Ext4Partition<'a> {
         let mut block_group_descriptors = Vec::new();
 
         for block_group_idx in 0..superblock.block_group_count() as usize {
-            let info = Ext4BlockGroupConstructionInfo::new(superblock, block_group_idx);
+            let info = Ext4BlockGroupConstructionInfo::new(&superblock, block_group_idx);
             block_group_descriptors.push(Ext4GroupDescriptor::new(info));
             block_groups.push(BlockGroup::new(partition_ptr, info));
         }

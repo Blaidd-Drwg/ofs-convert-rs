@@ -132,13 +132,13 @@ impl LongFileName {
     /// in reverse order, so the first entry's `sequence_no` equals the number of entries.
     pub fn sequence_no(&self) -> u8 {
         // in a valid LFN entry, bits 0-4 represent the sequence number
-        self.sequence_no & 0b00011111
+        self.sequence_no & 0b0001_1111
     }
 
     // TODO handle Errors
     pub fn to_utf8_string(self) -> String {
         std::char::decode_utf16(self.to_utf16_string())
-            .map(|utf16_char| utf16_char.unwrap())
+            .map(Result::unwrap)
             .collect()
     }
 

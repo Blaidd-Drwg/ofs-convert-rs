@@ -1,5 +1,3 @@
-use cmake;
-
 fn main() {
     let dst = cmake::Config::new("ofs-convert").build_target("ofs-convert").build();
 

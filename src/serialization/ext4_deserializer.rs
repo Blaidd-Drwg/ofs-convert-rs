@@ -34,7 +34,7 @@ impl<'a> ExtTreeDeserializer<'a> {
 
         match file_type {
             FileType::Directory(child_count) => {
-                self.deserialize_directory(inode, parent_dentry_writer, child_count, partition)
+                self.deserialize_directory(inode, parent_dentry_writer, child_count, partition);
             }
             FileType::RegularFile => self.deserialize_regular_file(inode, dentry.file_size as u64, partition),
         }
@@ -48,7 +48,7 @@ impl<'a> ExtTreeDeserializer<'a> {
         partition: &mut Ext4Partition<'a>,
     ) {
         let mut dentry_writer = DentryWriter::new(inode, Rc::clone(&self.allocator), partition);
-        self.build_dot_dirs(&mut parent_dentry_writer.inode, &mut dentry_writer, partition);
+        Self::build_dot_dirs(&mut parent_dentry_writer.inode, &mut dentry_writer, partition);
 
         for _ in 0..child_count {
             self.deserialize_file(&mut dentry_writer, partition);
@@ -64,7 +64,7 @@ impl<'a> ExtTreeDeserializer<'a> {
     fn build_root(&self, partition: &mut Ext4Partition<'a>) -> DentryWriter<'a> {
         let root_inode = partition.build_root_inode();
         let mut dentry_writer = DentryWriter::new(root_inode, Rc::clone(&self.allocator), partition);
-        self.build_root_dot_dirs(&mut dentry_writer, partition);
+        Self::build_root_dot_dirs(&mut dentry_writer, partition);
         self.build_lost_found(&mut dentry_writer, partition);
         dentry_writer
     }
@@ -75,11 +75,10 @@ impl<'a> ExtTreeDeserializer<'a> {
 
         root_dentry_writer.add_dentry(dentry, partition);
         let mut dentry_writer = DentryWriter::new(inode, Rc::clone(&self.allocator), partition);
-        self.build_dot_dirs(&mut root_dentry_writer.inode, &mut dentry_writer, partition);
+        Self::build_dot_dirs(&mut root_dentry_writer.inode, &mut dentry_writer, partition);
     }
 
     fn build_dot_dirs(
-        &self,
         parent_inode: &mut Inode,
         dentry_writer: &mut DentryWriter,
         partition: &mut Ext4Partition,
@@ -94,7 +93,7 @@ impl<'a> ExtTreeDeserializer<'a> {
     }
 
     // same as `build_dot_dirs` except `parent_inode` would alias `dentry_writer.inode`
-    fn build_root_dot_dirs(&self, dentry_writer: &mut DentryWriter, partition: &mut Ext4Partition) {
+    fn build_root_dot_dirs(dentry_writer: &mut DentryWriter, partition: &mut Ext4Partition) {
         let dot_dentry = Ext4Dentry::new(dentry_writer.inode.inode_no, ".".to_string());
         dentry_writer.add_dentry(dot_dentry, partition);
         dentry_writer.inode.increment_link_count();

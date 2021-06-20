@@ -8,20 +8,20 @@ use crate::ranges::{NotCoveredRange, Ranges};
 
 // TODO after reading, make directory dataclusters free
 // TODO ensure DataClusterIdx can also not be constructed
-/// An AllocatedClusterIdx represents a cluster that was allocated by Allocator and functions as a token to access that
-/// cluster, either through the Allocator itself or through the AllocatedReader derived from it. Invariant: no two
-/// AllocatedClusterIdx can have the same value; otherwise, `Allocator::cluster_mut` might alias.
+/// An `AllocatedClusterIdx` represents a cluster that was allocated by `Allocator` and functions as a token to access that
+/// cluster, either through the `Allocator` itself or through the `AllocatedReader` derived from it. Invariant: no two
+/// `AllocatedClusterIdx` can have the same value; otherwise, `Allocator::cluster_mut` might alias.
 #[derive(PartialEq, PartialOrd)]
 pub struct AllocatedClusterIdx(ClusterIdx);
 impl AllocatedClusterIdx {
-    /// SAFETY: Instantiating an AllocatedClusterIdx breaks the invariant! To avoid aliasing, the caller must ensure
+    /// SAFETY: Instantiating an `AllocatedClusterIdx` breaks the invariant! To avoid aliasing, the caller must ensure
     /// that `idx` was originally created from an `AllocatedClusterIdx` and that the original and the clone are not used
     /// to access a cluster simultaneously.
     pub unsafe fn new(idx: ClusterIdx) -> Self {
         Self(idx)
     }
 
-    /// SAFETY: Cloning an AllocatedClusterIdx breaks the invariant! To avoid aliasing, the caller must ensure that the
+    /// SAFETY: Cloning an `AllocatedClusterIdx` breaks the invariant! To avoid aliasing, the caller must ensure that the
     /// original and the clone are not used to access a cluster simultaneously.
     pub unsafe fn clone(&self) -> Self {
         Self(self.0)
@@ -42,11 +42,11 @@ impl From<AllocatedClusterIdx> for ClusterIdx {
 
 impl From<AllocatedClusterIdx> for usize {
     fn from(idx: AllocatedClusterIdx) -> Self {
-        idx.0 as usize
+        idx.0 as Self
     }
 }
 
-/// A newtype that can only be instantiated by Allocator to ensure that a range of AllocatedClusterIdx can only be used
+/// A newtype that can only be instantiated by Allocator to ensure that a range of `AllocatedClusterIdx` can only be used
 /// as an iterator if every cluster in that range has indeed been allocated.
 pub struct AllocatedRange(Range<AllocatedClusterIdx>);
 
@@ -110,8 +110,8 @@ pub struct Allocator<'a> {
 }
 
 impl<'a> Allocator<'a> {
-    /// SAFETY: Instantiating more than one Allocator can lead to undefined behavior, as mixing AllocatedClusterIdx
-    /// allocated by different Allocators can lead to aliasing
+    /// SAFETY: Instantiating more than one `Allocator` can lead to undefined behavior, as mixing `AllocatedClusterIdx`
+    /// allocated by different `Allocator`s can lead to aliasing
     pub unsafe fn new(
         partition_ptr: *mut u8,
         partition_len: usize,
@@ -138,8 +138,8 @@ impl<'a> Allocator<'a> {
         self.cluster_size
     }
 
-    /// Splits the Allocator into an AllocatedReader and an Allocator: the AllocatedReader can
-    /// only read clusters that were allocated by `self`, the Allocator can only write and read
+    /// Splits the `Allocator` into an `AllocatedReader` and an `Allocator`: the `AllocatedReader` can
+    /// only read clusters that were allocated by `self`, the `Allocator` can only write and read
     /// clusters that could have been allocated by `self` but were not yet allocated.
     pub fn split_into_reader(self) -> (AllocatedReader<'a>, Self) {
         let cursor_byte = self.cursor.get() as usize * self.cluster_size;
