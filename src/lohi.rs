@@ -1,75 +1,84 @@
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::mem::size_of;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 use num::PrimInt;
 
 
-/// Sometimes for space reasons a single 2X-byte wide value is split into two X-byte wide
-/// values which are stored non-adjacently on disk. LoHi and LoHiMut provide two abstractions
-/// to read and write these values without having to care about their on-disk representation.
-pub struct LoHiMut<'a, Full, Half>
+/// Sometimes for space/aligment reasons a single value is split into two smaller values which are stored non-adjacently
+/// on disk (e.g.: full value 0xBEEF into hi value 0xBE and lo value 0xEF). LoHi and LoHiMut provide an interface to
+/// read and write these values.
+pub struct LoHiMut<'a, Full, LoHalf, HiHalf>
 where
-    Full: PrimInt + From<Half>,
-    Half: PrimInt + TryFrom<Full>,
-    Half::Error: Debug,
+    Full: PrimInt + From<LoHalf> + From<HiHalf>,
+    LoHalf: PrimInt + TryFrom<Full>,
+    HiHalf: PrimInt + TryFrom<Full>,
+    LoHalf::Error: Debug,
+    HiHalf::Error: Debug,
 {
-    pub lo: &'a mut Half,
-    pub hi: &'a mut Half,
-    full: PhantomData<Full>,
+    pub lo: &'a mut LoHalf,
+    pub hi: &'a mut HiHalf,
+    _full: PhantomData<Full>,
 }
 
-impl<'a, Full, Half> LoHiMut<'a, Full, Half>
+impl<'a, Full, LoHalf, HiHalf> LoHiMut<'a, Full, LoHalf, HiHalf>
 where
-    Full: PrimInt + From<Half>,
-    Half: PrimInt + TryFrom<Full>,
-    Half::Error: Debug,
+    Full: PrimInt + From<LoHalf> + From<HiHalf>,
+    LoHalf: PrimInt + TryFrom<Full>,
+    HiHalf: PrimInt + TryFrom<Full>,
+    LoHalf::Error: Debug,
+    HiHalf::Error: Debug,
 {
-    const HALF_BIT_COUNT: usize = std::mem::size_of::<Half>() * 8;
+    const LO_HALF_BIT_COUNT: usize = std::mem::size_of::<LoHalf>() * 8;
 
-    // ideally would be const, but zero is not a const fn
-    fn lower_half_mask() -> Full {
-        (!Half::zero()).into()
+    // ideally would be const, but `zero` is not a const fn
+    fn lo_half_mask() -> Full {
+        (!LoHalf::zero()).into()
     }
 
-    pub fn new(lo: &'a mut Half, hi: &'a mut Half) -> Self {
-        assert_eq!(
-            2 * std::mem::size_of::<Half>(),
-            std::mem::size_of::<Full>(),
-            "Attempting to create a LoHi where `Half` is not half the size of `Full`."
+    pub fn new(lo: &'a mut LoHalf, hi: &'a mut HiHalf) -> Self {
+        // ideally would be a const_assert, but it doesn't work with generics
+        assert!(
+            size_of::<LoHalf>() + size_of::<HiHalf>() <= size_of::<Full>(),
+            "Attempting to create a LoHiMut where a `LoHalf` and a `HiHalf` do not fit into a `Full`."
         );
-        Self { lo, hi, full: PhantomData }
+        Self { lo, hi, _full: PhantomData }
     }
 
     pub fn get(&self) -> Full {
         let hi: Full = (*self.hi).into();
         let lo: Full = (*self.lo).into();
-        (hi << Self::HALF_BIT_COUNT) + lo
+        (hi << Self::LO_HALF_BIT_COUNT) + lo
     }
 
     pub fn set(&mut self, value: Full) {
-        *self.lo = Half::try_from(value & Self::lower_half_mask()).unwrap();
-        *self.hi = Half::try_from(value >> Self::HALF_BIT_COUNT).unwrap();
+        *self.lo = LoHalf::try_from(value & Self::lo_half_mask()).unwrap();
+        *self.hi = HiHalf::try_from(value >> Self::LO_HALF_BIT_COUNT).unwrap();
     }
 }
 
-impl<'a, Full, Half> AddAssign<Full> for LoHiMut<'a, Full, Half>
+impl<'a, Full, LoHalf, HiHalf> AddAssign<Full> for LoHiMut<'a, Full, LoHalf, HiHalf>
 where
-    Full: PrimInt + From<Half>,
-    Half: PrimInt + TryFrom<Full>,
-    Half::Error: Debug,
+    Full: PrimInt + From<LoHalf> + From<HiHalf>,
+    LoHalf: PrimInt + TryFrom<Full>,
+    HiHalf: PrimInt + TryFrom<Full>,
+    LoHalf::Error: Debug,
+    HiHalf::Error: Debug,
 {
     fn add_assign(&mut self, other: Full) {
         self.set(self.get() + other);
     }
 }
 
-impl<'a, Full, Half> SubAssign<Full> for LoHiMut<'a, Full, Half>
+impl<'a, Full, LoHalf, HiHalf> SubAssign<Full> for LoHiMut<'a, Full, LoHalf, HiHalf>
 where
-    Full: PrimInt + From<Half>,
-    Half: PrimInt + TryFrom<Full>,
-    Half::Error: Debug,
+    Full: PrimInt + From<LoHalf> + From<HiHalf>,
+    LoHalf: PrimInt + TryFrom<Full>,
+    HiHalf: PrimInt + TryFrom<Full>,
+    LoHalf::Error: Debug,
+    HiHalf::Error: Debug,
 {
     fn sub_assign(&mut self, other: Full) {
         self.set(self.get() - other);
@@ -77,41 +86,52 @@ where
 }
 
 
-pub struct LoHi<'a, Full, Half>
+pub struct LoHi<'a, Full, LoHalf, HiHalf>
 where
-    Full: PrimInt + From<Half>,
-    Half: PrimInt + TryFrom<Full>,
-    Half::Error: Debug,
+    Full: PrimInt + From<LoHalf> + From<HiHalf>,
+    LoHalf: PrimInt + TryFrom<Full>,
+    HiHalf: PrimInt + TryFrom<Full>,
+    LoHalf::Error: Debug,
+    HiHalf::Error: Debug,
 {
-    pub lo: &'a Half,
-    pub hi: &'a Half,
-    full: PhantomData<Full>,
+    pub lo: &'a LoHalf,
+    pub hi: &'a HiHalf,
+    _full: PhantomData<Full>,
 }
 
-impl<'a, Full, Half> LoHi<'a, Full, Half>
+impl<'a, Full, LoHalf, HiHalf> LoHi<'a, Full, LoHalf, HiHalf>
 where
-    Full: PrimInt + From<Half>,
-    Half: PrimInt + TryFrom<Full>,
-    Half::Error: Debug,
+    Full: PrimInt + From<LoHalf> + From<HiHalf>,
+    LoHalf: PrimInt + TryFrom<Full>,
+    HiHalf: PrimInt + TryFrom<Full>,
+    LoHalf::Error: Debug,
+    HiHalf::Error: Debug,
 {
-    const HALF_BIT_COUNT: usize = std::mem::size_of::<Half>() * 8;
+    const LO_HALF_BIT_COUNT: usize = size_of::<LoHalf>() * 8;
 
-    pub fn new(lo: &'a Half, hi: &'a Half) -> Self {
-        Self { lo, hi, full: PhantomData }
+    pub fn new(lo: &'a LoHalf, hi: &'a HiHalf) -> Self {
+        // ideally would be a const_assert, but it doesn't work with generics
+        assert!(
+            size_of::<LoHalf>() + size_of::<HiHalf>() <= size_of::<Full>(),
+            "Attempting to create a LoHi where a `LoHalf` and a `HiHalf` do not fit into a `Full`."
+        );
+        Self { lo, hi, _full: PhantomData }
     }
 
     pub fn get(&self) -> Full {
         let hi: Full = (*self.hi).into();
         let lo: Full = (*self.lo).into();
-        (hi << Self::HALF_BIT_COUNT) + lo
+        (hi << Self::LO_HALF_BIT_COUNT) + lo
     }
 }
 
-impl<'a, Full, Half> Add<Full> for LoHi<'a, Full, Half>
+impl<'a, Full, LoHalf, HiHalf> Add<Full> for LoHi<'a, Full, LoHalf, HiHalf>
 where
-    Full: PrimInt + From<Half>,
-    Half: PrimInt + TryFrom<Full>,
-    Half::Error: Debug,
+    Full: PrimInt + From<LoHalf> + From<HiHalf>,
+    LoHalf: PrimInt + TryFrom<Full>,
+    HiHalf: PrimInt + TryFrom<Full>,
+    LoHalf::Error: Debug,
+    HiHalf::Error: Debug,
 {
     type Output = Full;
     fn add(self, other: Full) -> Self::Output {
@@ -119,11 +139,13 @@ where
     }
 }
 
-impl<'a, Full, Half> Sub<Full> for LoHi<'a, Full, Half>
+impl<'a, Full, LoHalf, HiHalf> Sub<Full> for LoHi<'a, Full, LoHalf, HiHalf>
 where
-    Full: PrimInt + From<Half>,
-    Half: PrimInt + TryFrom<Full>,
-    Half::Error: Debug,
+    Full: PrimInt + From<LoHalf> + From<HiHalf>,
+    LoHalf: PrimInt + TryFrom<Full>,
+    HiHalf: PrimInt + TryFrom<Full>,
+    LoHalf::Error: Debug,
+    HiHalf::Error: Debug,
 {
     type Output = Full;
     fn sub(self, other: Full) -> Self::Output {

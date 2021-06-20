@@ -1,7 +1,7 @@
 #![allow(dead_code)]
-#![feature(step_trait)]
 
 mod allocator;
+mod bitmap;
 mod c_wrapper;
 mod ext4;
 mod fat;
@@ -21,7 +21,6 @@ use static_assertions::const_assert;
 use crate::c_wrapper::{c_end_writing, c_initialize, c_start_writing};
 use crate::ext4::SuperBlock;
 use crate::partition::Partition;
-use crate::ranges::Ranges;
 use crate::serialization::FatTreeSerializer;
 
 // u32 must fit into usize
@@ -56,7 +55,7 @@ unsafe fn ofs_convert(partition_path: &str) -> io::Result<()> {
         fat::FatPartition::new_with_allocator(partition.as_mut_ptr(), partition.len(), partition.lifetime);
     let boot_sector = *fat_partition.boot_sector();
     let superblock = SuperBlock::from(&boot_sector)?;
-    let forbidden_ranges = Ranges::from(superblock.block_group_overhead_ranges());
+    let forbidden_ranges = superblock.block_group_overhead_ranges();
     for range in &forbidden_ranges {
         allocator.forbid(range.clone());
     }

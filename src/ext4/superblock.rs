@@ -1,12 +1,12 @@
 use std::convert::TryFrom;
 use std::io;
-use std::ops::Range;
 
 use num::Integer;
 use uuid::Uuid;
 
 use crate::fat::{BootSector, ClusterIdx};
 use crate::lohi::{LoHi, LoHiMut};
+use crate::ranges::Ranges;
 
 pub const EXT4_ROOT_INODE: u32 = 2;
 pub const EXT4_LOST_FOUND_INODE: u32 = 11;
@@ -226,22 +226,20 @@ impl SuperBlock {
     }
 
     // should I call bg has super from here instead?
-    fn block_group_overhead(&self, has_superblock: HasSuperBlock) -> u64 {
+    pub fn block_group_overhead(&self, has_superblock: HasSuperBlock) -> u64 {
         // block bitmap + inode bitmap + inode table
-        let mut overhead = 2 + self.inode_table_block_count();
+        let default_overhead = 2 + self.inode_table_block_count();
+        default_overhead + self.superblock_copy_overhead(has_superblock)
+    }
+
+    pub fn superblock_copy_overhead(&self, has_superblock: HasSuperBlock) -> u64 {
         match has_superblock {
             HasSuperBlock::YesOriginal | HasSuperBlock::YesBackup => {
                 // superblock + group descriptor table
-                overhead += 1 + self.gdt_block_count() + u64::from(self.s_reserved_gdt_blocks);
+                1 + self.gdt_block_count() + u64::from(self.s_reserved_gdt_blocks)
             }
-            HasSuperBlock::No => (),
+            HasSuperBlock::No => 0,
         }
-
-        if has_superblock == HasSuperBlock::YesOriginal && self.block_size() <= GROUP_0_PADDING {
-            // the entire first block is padding
-            overhead += 1;
-        }
-        overhead
     }
 
     fn gdt_block_count(&self) -> u64 {
@@ -256,7 +254,7 @@ impl SuperBlock {
         self.block_group_count().div_ceil(&descriptors_that_fit_into_a_block)
     }
 
-    fn inode_table_block_count(&self) -> u64 {
+    pub fn inode_table_block_count(&self) -> u64 {
         let inode_table_size = u64::from(self.s_inodes_per_group) * u64::from(self.s_inode_size);
         inode_table_size.div_ceil(&self.block_size())
     }
@@ -265,9 +263,17 @@ impl SuperBlock {
         1 << (self.s_log_block_size + EXT4_BLOCK_SIZE_MIN_LOG2)
     }
 
+    /// Includes a possible first padding block that does not belong to any block group
+    pub fn block_count_with_padding(&self) -> u64 {
+        LoHi::new(&self.s_blocks_count_lo, &self.s_blocks_count_hi).get()
+    }
+
+    pub fn block_count_without_padding(&self) -> u64 {
+        self.block_count_with_padding() - self.s_first_data_block as u64
+    }
+
     pub fn block_group_count(&self) -> u64 {
-        let block_count: u64 = LoHi::new(&self.s_blocks_count_lo, &self.s_blocks_count_hi).get();
-        block_count.div_ceil(&u64::from(self.s_blocks_per_group))
+        self.block_count_without_padding().div_ceil(&u64::from(self.s_blocks_per_group))
     }
 
     pub fn block_group_has_superblock(&self, block_group_idx: usize) -> HasSuperBlock {
@@ -285,20 +291,30 @@ impl SuperBlock {
         self.s_blocks_per_group * block_group_idx as u32 + self.s_first_data_block
     }
 
-    pub fn block_group_overhead_ranges(&self) -> Vec<Range<ClusterIdx>> {
-        (0..self.block_group_count() as usize)
-            .map(|block_group_idx| {
-                let has_sb_copy = self.block_group_has_superblock(block_group_idx);
-                let overhead = self.block_group_overhead(has_sb_copy);
+    pub fn block_group_overhead_ranges(&self) -> Ranges<ClusterIdx> {
+        let mut overhead_ranges = Vec::new();
+        if self.block_size() <= GROUP_0_PADDING {
+            // the entire first block is padding
+            overhead_ranges.push(0..1);
+        }
 
-                let start_cluster_idx = self.block_group_start_cluster(block_group_idx);
-                start_cluster_idx..start_cluster_idx + u32::try_from(overhead).unwrap()
-            })
-            .collect()
+        let block_group_overhead_ranges = (0..self.block_group_count() as usize).map(|block_group_idx| {
+            let has_sb_copy = self.block_group_has_superblock(block_group_idx);
+            let overhead = self.block_group_overhead(has_sb_copy);
+
+            let start_cluster_idx = self.block_group_start_cluster(block_group_idx);
+            start_cluster_idx..start_cluster_idx + u32::try_from(overhead).unwrap()
+        });
+        overhead_ranges.extend(block_group_overhead_ranges);
+        Ranges::from(overhead_ranges)
+    }
+
+    pub fn set_free_blocks_count(&mut self, count: u64) {
+        LoHiMut::new(&mut self.s_free_blocks_count_lo, &mut self.s_free_blocks_count_hi).set(count);
     }
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum HasSuperBlock {
     YesOriginal,
     YesBackup,

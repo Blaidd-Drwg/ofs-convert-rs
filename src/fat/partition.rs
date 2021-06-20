@@ -81,13 +81,8 @@ impl<'a> FatPartition<'a> {
     }
 
     pub fn into_ext4(self) -> Ext4Partition<'a> {
-        let partition_data = unsafe {
-            let start_ptr = self.boot_sector as *const _ as *mut u8;
-            let end_ptr = self.data_ptr.add(self.data_len);
-            let len = end_ptr.offset_from(start_ptr);
-            std::slice::from_raw_parts_mut(start_ptr, usize::try_from(len).unwrap())
-        };
-        Ext4Partition::from(partition_data, self.boot_sector)
+        let start_ptr = self.boot_sector as *const _ as *mut u8;
+        unsafe { Ext4Partition::from(start_ptr, self.boot_sector) }
     }
 
     pub fn boot_sector(&self) -> &BootSector {

@@ -26,10 +26,10 @@ ext4_extent to_ext4_extent(const fat_extent *fext) {
 }
 
 void register_extent(uint64_t extent_start_block, uint64_t extent_len, uint32_t inode_no) {
-    ext4_inode *inode = &get_existing_inode(inode_no);
+    // ext4_inode *inode = &get_existing_inode(inode_no);
 
-    uint32_t block_count = static_cast<uint32_t>(extent_len) * block_size() / 512;  // number of 512-byte blocks allocated
-    incr_lo_hi(inode->i_blocks_lo, inode->l_i_blocks_high, block_count);
+    // uint32_t block_count = static_cast<uint32_t>(extent_len) * block_size() / 512;  // number of 512-byte blocks allocated
+    // incr_lo_hi(inode->i_blocks_lo, inode->l_i_blocks_high, block_count);
 
     add_extent_to_block_bitmap(extent_start_block, extent_start_block + extent_len);
 }

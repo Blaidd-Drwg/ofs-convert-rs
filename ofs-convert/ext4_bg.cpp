@@ -93,8 +93,8 @@ fat_extent *create_block_group_meta_extents(uint32_t bg_count) {
 void init_ext4_group_descs() {
     uint32_t bg_count = block_group_count();
     uint32_t gdt_blocks = gdt_block_count();
-    uint32_t blk_size = block_size();
-    uint32_t itable_blocks = inode_table_blocks();
+    // uint32_t blk_size = block_size();
+    // uint32_t itable_blocks = inode_table_blocks();
 
     group_descs = static_cast<ext4_group_desc *>(malloc(bg_count * sizeof(ext4_group_desc)));
     memset(group_descs, 0, bg_count * sizeof(ext4_group_desc));
@@ -124,17 +124,17 @@ void init_ext4_group_descs() {
         set_lo_hi(bg.bg_free_blocks_count_lo, bg.bg_free_blocks_count_hi,
                   block_count - bg_overhead);
 
-        uint8_t *block_bitmap = block_start(block_bitmap_block);
-        uint8_t *inode_bitmap = block_start(inode_bitmap_block);
-        uint8_t *inode_table = block_start(inode_table_block);
+        // uint8_t *block_bitmap = block_start(block_bitmap_block);
+        // uint8_t *inode_bitmap = block_start(inode_bitmap_block);
+        // uint8_t *inode_table = block_start(inode_table_block);
 
-        memset(block_bitmap, 0, blk_size);
-        bitmap_set_bits(block_bitmap, 0, bg_overhead);
-        bitmap_set_bits(block_bitmap, block_count, blk_size * 8);
-        memset(inode_bitmap, 0, blk_size);
-        bitmap_set_bits(inode_bitmap, 0, used_inodes);
-        bitmap_set_bits(inode_bitmap, sb.s_inodes_per_group, blk_size * 8);
-        memset(inode_table, 0, blk_size * itable_blocks);
+        // memset(block_bitmap, 0, blk_size);
+        // bitmap_set_bits(block_bitmap, 0, bg_overhead);
+        // bitmap_set_bits(block_bitmap, block_count, blk_size * 8);
+        // memset(inode_bitmap, 0, blk_size);
+        // bitmap_set_bits(inode_bitmap, 0, used_inodes);
+        // bitmap_set_bits(inode_bitmap, sb.s_inodes_per_group, blk_size * 8);
+        // memset(inode_table, 0, blk_size * itable_blocks);
     }
 }
 

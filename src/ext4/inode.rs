@@ -72,4 +72,11 @@ impl<'a> Inode<'a> {
             ExtentTree::new(root_level, allocator)
         }
     }
+
+    pub fn increment_used_blocks(&mut self, block_count: usize, block_size: usize) {
+        // number of 512-byte blocks allocated
+        let mini_block_count = block_count * block_size / 512;
+        let mut current_mini_block_count = LoHiMut::new(&mut self.inner.i_blocks_lo, &mut self.inner.l_i_blocks_high);
+        current_mini_block_count += mini_block_count as u64;
+    }
 }
