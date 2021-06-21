@@ -34,10 +34,10 @@ impl Ext4GroupDescriptor {
         let block_bitmap_block = info.start_block + info.relative_block_bitmap_block;
         let inode_bitmap_block = info.start_block + info.relative_inode_bitmap_block;
         let inode_table_start_block = info.start_block + info.relative_inode_table_start_block;
-        let free_inodes_count = info.inodes_count - info.used_inode_count;
+        let free_inodes_count = info.inodes_count - info.reserved_inode_count;
         let free_blocks_count = info.blocks_count as u64 - info.overhead;
 
-        let mut instance = Self::default();
+        let mut instance = Self::default(); // zero every field
         LoHiMut::new(&mut instance.bg_block_bitmap_lo, &mut instance.bg_block_bitmap_hi).set(block_bitmap_block);
         LoHiMut::new(&mut instance.bg_inode_bitmap_lo, &mut instance.bg_inode_bitmap_hi).set(inode_bitmap_block);
         LoHiMut::new(&mut instance.bg_inode_table_lo, &mut instance.bg_inode_table_hi).set(inode_table_start_block);
@@ -59,5 +59,15 @@ impl Ext4GroupDescriptor {
     pub fn decrement_free_blocks_count(&mut self, count: u32) {
         let mut free_blocks = LoHiMut::new(&mut self.bg_free_blocks_count_lo, &mut self.bg_free_blocks_count_hi);
         free_blocks -= count;
+    }
+
+    pub fn decrement_free_inode_count(&mut self) {
+        let mut free_inodes = LoHiMut::new(&mut self.bg_free_inodes_count_lo, &mut self.bg_free_inodes_count_hi);
+        free_inodes -= 1;
+    }
+
+    pub fn increment_used_directory_count(&mut self) {
+        let mut used_dirs = LoHiMut::new(&mut self.bg_used_dirs_count_lo, &mut self.bg_used_dirs_count_hi);
+        used_dirs += 1;
     }
 }

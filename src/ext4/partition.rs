@@ -3,7 +3,6 @@ use std::ops::Range;
 use num::Integer;
 
 use crate::allocator::Allocator;
-use crate::c_wrapper::{c_add_extent, c_add_inode};
 use crate::ext4::{
     BlockGroup, Ext4BlockGroupConstructionInfo, Ext4GroupDescriptor, Extent, Inode, SuperBlock, EXT4_LOST_FOUND_INODE,
     EXT4_ROOT_INODE, FIRST_NON_RESERVED_INODE,
@@ -13,8 +12,6 @@ use crate::fat::{BootSector, ClusterIdx};
 pub const FIRST_EXISTING_INODE: u32 = 1;
 
 pub struct Ext4Partition<'a> {
-    // padding: &'a mut [u8; GROUP_0_PADDING as usize],
-    start: *const u8, // temporary
     block_groups: Vec<BlockGroup<'a>>,
     next_free_inode_no: u32,
 }
@@ -38,7 +35,6 @@ impl<'a> Ext4Partition<'a> {
             .unwrap()
             .copy_from_slice(&block_group_descriptors);
         Self {
-            start: partition_ptr,
             block_groups,
             next_free_inode_no: FIRST_NON_RESERVED_INODE,
         }
@@ -54,11 +50,6 @@ impl<'a> Ext4Partition<'a> {
 
     pub fn group_descriptor_table_mut(&mut self) -> &mut [Ext4GroupDescriptor] {
         self.block_groups[0].gdt.as_deref_mut().unwrap()
-    }
-
-    // temporary
-    pub fn as_ptr(&self) -> *const u8 {
-        self.start
     }
 
     pub fn set_extents(&mut self, inode: &mut Inode, extents: Vec<Range<ClusterIdx>>, allocator: &Allocator<'_>) {
@@ -86,8 +77,6 @@ impl<'a> Ext4Partition<'a> {
     }
 
     pub fn mark_range_as_used(&mut self, inode: &mut Inode, range: Range<ClusterIdx>) {
-        c_add_extent(inode.inode_no, range.start, range.len() as u16);
-
         inode.increment_used_blocks(range.len(), self.superblock().block_size() as usize);
 
         let block_group_idx = self.block_group_idx_of_block(range.start);
@@ -107,7 +96,10 @@ impl<'a> Ext4Partition<'a> {
         let inner = self.block_groups[0].get_relative_inode(existing_inode_no as usize, inode_size);
         let mut inode = Inode { inode_no, inner };
         inode.init_root();
-        c_add_inode(inode_no, true);
+
+        let descriptor = &mut self.group_descriptor_table_mut()[0];
+        // root inode is reserved and already marked as not free, no need to decrement count
+        descriptor.increment_used_directory_count();
         inode
     }
 
@@ -130,17 +122,38 @@ impl<'a> Ext4Partition<'a> {
         let block_group = &mut self.block_groups[block_group_idx as usize];
         let inner = block_group.allocate_relative_inode(relative_inode_no as usize, inode_size);
 
-        c_add_inode(inode_no, is_dir);
+        let descriptor = &mut self.group_descriptor_table_mut()[block_group_idx as usize];
+        descriptor.decrement_free_inode_count();
+        if is_dir {
+            descriptor.increment_used_directory_count();
+        }
 
         Inode { inode_no, inner }
     }
 }
 
-        // // Make superblock and group descriptor table backup copies
-        // let superblock = *self.superblock_mut();
-        // let gdt = self.group_descriptor_table_mut().to_vec();
-        // for backup_group_idx in superblock.s_backup_bgs {
-        // let block_group = &mut self.block_groups[backup_group_idx as usize];
-        // (*block_group.superblock.as_deref_mut().unwrap()) = superblock;
-        // block_group.gdt.as_deref_mut().unwrap().copy_from_slice(&gdt);
-        // }
+impl Drop for Ext4Partition<'_> {
+    fn drop(&mut self) {
+        // Fill in sum fields in superblock with data from group descriptors
+        self.superblock_mut().s_free_inodes_count = self
+            .group_descriptor_table_mut()
+            .iter_mut()
+            .map(|block_group| block_group.free_inodes_count())
+            .sum();
+        let free_blocks_count = self
+            .group_descriptor_table_mut()
+            .iter_mut()
+            .map(|block_group| block_group.free_blocks_count() as u64)
+            .sum();
+        self.superblock_mut().set_free_blocks_count(free_blocks_count);
+
+        // Make superblock and group descriptor table backup copies
+        let superblock = *self.superblock_mut();
+        let gdt = self.group_descriptor_table_mut().to_vec();
+        for backup_group_idx in superblock.s_backup_bgs {
+            let block_group = &mut self.block_groups[backup_group_idx as usize];
+            (*block_group.superblock.as_deref_mut().unwrap()) = superblock;
+            block_group.gdt.as_deref_mut().unwrap().copy_from_slice(&gdt);
+        }
+    }
+}

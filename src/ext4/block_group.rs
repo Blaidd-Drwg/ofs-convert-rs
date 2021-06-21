@@ -92,7 +92,7 @@ impl<'a> BlockGroup<'a> {
         inode_bitmap.fill(0);
 
         let mut bitmap = Bitmap { data: inode_bitmap };
-        for used_inode_idx in 0..info.used_inode_count {
+        for used_inode_idx in 0..info.reserved_inode_count {
             bitmap.set(used_inode_idx);
         }
         for nonexistent_inode_idx in info.inodes_count..bitmap.len() {
@@ -152,7 +152,7 @@ pub struct Ext4BlockGroupConstructionInfo {
     pub inode_table_block_count: usize,
     pub has_superblock: HasSuperBlock,
     pub block_size: u64,
-    pub used_inode_count: usize,
+    pub reserved_inode_count: usize,
     pub overhead: u64,
 }
 
@@ -181,7 +181,7 @@ impl Ext4BlockGroupConstructionInfo {
             has_superblock,
             block_size: superblock.block_size(),
             overhead: superblock.block_group_overhead(has_superblock),
-            used_inode_count: if block_group_idx == 0 {
+            reserved_inode_count: if block_group_idx == 0 {
                 FIRST_NON_RESERVED_INODE as usize - FIRST_EXISTING_INODE as usize
             } else {
                 0

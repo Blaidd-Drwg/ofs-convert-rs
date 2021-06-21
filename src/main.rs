@@ -2,7 +2,6 @@
 
 mod allocator;
 mod bitmap;
-mod c_wrapper;
 mod ext4;
 mod fat;
 mod lohi;
@@ -17,7 +16,6 @@ use std::mem::size_of;
 
 use static_assertions::const_assert;
 
-use crate::c_wrapper::{c_end_writing, c_initialize, c_start_writing};
 use crate::ext4::SuperBlock;
 use crate::partition::Partition;
 use crate::serialization::FatTreeSerializer;
@@ -64,12 +62,7 @@ unsafe fn ofs_convert(partition_path: &str) -> io::Result<()> {
 
     let mut deserializer = serializer.into_deserializer();
     let mut ext4_partition = fat_partition.into_ext4();
-    c_initialize(ext4_partition.as_ptr() as *mut u8, superblock, boot_sector);
-    c_start_writing();
     deserializer.deserialize_directory_tree(&mut ext4_partition);
-    c_end_writing();
 
-    // TODO write block group headers (breaks FAT)
-    // TODO convert file metadata (makes ext4)
     Ok(())
 }

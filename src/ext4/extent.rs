@@ -14,7 +14,6 @@ const_assert_eq!(size_of::<ExtentIdx>(), size_of::<ExtentTreeElement>());
 
 const EXTENT_TREE_LEAF_DEPTH: u16 = 0;
 const EXTENT_MAGIC: u16 = 0xF30A;
-const EXTENT_INODE_BLOCK_SIZE: usize = size_of::<[ExtentTreeElement; EXTENT_ENTRIES_IN_INODE]>();
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
