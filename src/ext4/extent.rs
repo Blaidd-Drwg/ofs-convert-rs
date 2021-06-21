@@ -38,9 +38,9 @@ pub struct ExtentIdx {
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub union ExtentTreeElement {
-    header: ExtentHeader,
-    idx: ExtentIdx,
-    extent: Extent,
+    pub header: ExtentHeader,
+    pub idx: ExtentIdx,
+    pub extent: Extent,
 }
 
 #[repr(C)]

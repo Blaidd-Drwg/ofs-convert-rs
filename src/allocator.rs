@@ -8,9 +8,9 @@ use crate::ranges::{NotCoveredRange, Ranges};
 
 // TODO after reading, make directory dataclusters free
 // TODO ensure DataClusterIdx can also not be constructed
-/// An `AllocatedClusterIdx` represents a cluster that was allocated by `Allocator` and functions as a token to access that
-/// cluster, either through the `Allocator` itself or through the `AllocatedReader` derived from it. Invariant: no two
-/// `AllocatedClusterIdx` can have the same value; otherwise, `Allocator::cluster_mut` might alias.
+/// An `AllocatedClusterIdx` represents a cluster that was allocated by `Allocator` and functions as a token to access
+/// that cluster, either through the `Allocator` itself or through the `AllocatedReader` derived from it. Invariant: no
+/// two `AllocatedClusterIdx` can have the same value; otherwise, `Allocator::cluster_mut` might alias.
 #[derive(PartialEq, PartialOrd)]
 pub struct AllocatedClusterIdx(ClusterIdx);
 impl AllocatedClusterIdx {
@@ -21,8 +21,8 @@ impl AllocatedClusterIdx {
         Self(idx)
     }
 
-    /// SAFETY: Cloning an `AllocatedClusterIdx` breaks the invariant! To avoid aliasing, the caller must ensure that the
-    /// original and the clone are not used to access a cluster simultaneously.
+    /// SAFETY: Cloning an `AllocatedClusterIdx` breaks the invariant! To avoid aliasing, the caller must ensure that
+    /// the original and the clone are not used to access a cluster simultaneously.
     pub unsafe fn clone(&self) -> Self {
         Self(self.0)
     }
@@ -46,8 +46,8 @@ impl From<AllocatedClusterIdx> for usize {
     }
 }
 
-/// A newtype that can only be instantiated by Allocator to ensure that a range of `AllocatedClusterIdx` can only be used
-/// as an iterator if every cluster in that range has indeed been allocated.
+/// A newtype that can only be instantiated by Allocator to ensure that a range of `AllocatedClusterIdx` can only be
+/// used as an iterator if every cluster in that range has indeed been allocated.
 pub struct AllocatedRange(Range<AllocatedClusterIdx>);
 
 impl AllocatedRange {

@@ -40,7 +40,7 @@ uint32_t block_group_overhead(bool has_sb_copy);
 uint32_t block_group_overhead(uint32_t bg_num);
 fat_extent *create_block_group_meta_extents(uint32_t bg_count);
 void init_ext4_group_descs();
-void add_inode(const ext4_inode& inode, uint32_t inode_num);
+void add_inode(uint32_t inode_num, bool is_dir);
 void add_reserved_inode(const ext4_inode& inode, uint32_t inode_num);
 void add_extent_to_block_bitmap(uint64_t blocks_begin, uint64_t blocks_end);
 ext4_inode& get_existing_inode(uint32_t inode_num);

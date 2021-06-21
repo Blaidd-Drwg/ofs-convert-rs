@@ -1,5 +1,6 @@
 use crate::fat::FatTableIndex;
 use crate::lohi::LoHi;
+use crate::serialization::fat_time_to_unix_time;
 
 #[repr(C)]
 pub union FatPseudoDentry {
@@ -111,6 +112,19 @@ impl FatDentry {
         }
         name_string
     }
+
+    // TODO either rework archiving or move `fat_time_to_unix_time` to this module
+    pub fn access_time_as_unix(&self) -> u32 {
+        fat_time_to_unix_time(self.access_date, None)
+    }
+
+    pub fn create_time_as_unix(&self) -> u32 {
+        fat_time_to_unix_time(self.create_date, Some(self.create_time))
+    }
+
+    pub fn modify_time_as_unix(&self) -> u32 {
+        fat_time_to_unix_time(self.mod_date, Some(self.mod_time))
+    }
 }
 
 
@@ -137,9 +151,7 @@ impl LongFileName {
 
     // TODO handle Errors
     pub fn to_utf8_string(self) -> String {
-        std::char::decode_utf16(self.to_utf16_string())
-            .map(Result::unwrap)
-            .collect()
+        std::char::decode_utf16(self.to_utf16_string()).map(Result::unwrap).collect()
     }
 
     // By the standard, long file names are encoded in UCS-2. However, the Linux implementation

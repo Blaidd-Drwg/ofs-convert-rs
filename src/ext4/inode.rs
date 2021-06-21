@@ -1,9 +1,29 @@
+use chrono::prelude::*;
+use nix::unistd::{getegid, geteuid};
+
 use crate::allocator::Allocator;
-use crate::ext4::{Extent, ExtentTree, ExtentTreeElement, ExtentTreeLevel};
-use crate::fat::ClusterIdx;
+use crate::ext4::{Extent, ExtentHeader, ExtentTree, ExtentTreeElement, ExtentTreeLevel};
+use crate::fat::{ClusterIdx, FatDentry};
 use crate::lohi::LoHiMut;
 
 pub const EXTENT_ENTRIES_IN_INODE: usize = 5;
+const ROOT_USER_ID: u32 = 0;
+const ROOT_GROUP_ID: u32 = 0;
+
+// i_flags
+const INODE_USES_EXTENTS: u32 = 0x00080000;
+
+// i_mode
+const DIR_FLAG: u16 = 0o040_000;
+const REG_FLAG: u16 = 0o100_000;
+const READ_USER: u16 = 0o000_400;
+const READ_GROUP: u16 = 0o000_200;
+const READ_OTHERS: u16 = 0o000_100;
+const WRITE_USER: u16 = 0o000_040;
+const WRITE_GROUP: u16 = 0o000_020;
+const EXECUTE_USER: u16 = 0o000_002;
+const EXECUTE_GROUP: u16 = 0o000_004;
+const DEFAULT_RWX: u16 = READ_USER | READ_GROUP | READ_OTHERS | WRITE_USER | WRITE_GROUP | EXECUTE_USER | EXECUTE_GROUP;
 
 pub struct Inode<'a> {
     pub inode_no: u32,
@@ -48,6 +68,17 @@ pub struct InodeInner {
 }
 
 impl<'a> Inode<'a> {
+    pub fn init_from_dentry(&mut self, dentry: FatDentry) {
+        self.inner.init_from_dentry(dentry);
+    }
+
+    pub fn init_lost_found(&mut self) {
+        self.inner.init_lost_found();
+    }
+    pub fn init_root(&mut self) {
+        self.inner.init_root();
+    }
+
     pub fn increment_size(&mut self, size: u64) {
         let mut current_size = LoHiMut::new(&mut self.inner.i_size_lo, &mut self.inner.i_size_high);
         current_size += size;
@@ -78,5 +109,56 @@ impl<'a> Inode<'a> {
         let mini_block_count = block_count * block_size / 512;
         let mut current_mini_block_count = LoHiMut::new(&mut self.inner.i_blocks_lo, &mut self.inner.l_i_blocks_high);
         current_mini_block_count += mini_block_count as u64;
+    }
+}
+
+impl InodeInner {
+    fn init_from_dentry(&mut self, dentry: FatDentry) {
+        let user_id = u32::from(geteuid());
+        let group_id = u32::from(getegid());
+        LoHiMut::new(&mut self.i_uid, &mut self.l_i_uid_high).set(user_id);
+        LoHiMut::new(&mut self.i_gid, &mut self.l_i_gid_high).set(group_id);
+        self.i_mode = DEFAULT_RWX | if dentry.is_dir() { DIR_FLAG } else { REG_FLAG };
+        self.i_crtime = dentry.create_time_as_unix();
+        self.i_atime = dentry.access_time_as_unix();
+        self.i_mtime = dentry.modify_time_as_unix();
+        self.i_ctime = self.i_mtime + 1; // mimic behavior of the Linux FAT driver
+        self.i_links_count = 1; // TODO hardlinks?
+        self.i_flags = INODE_USES_EXTENTS;
+        self.init_extent_header();
+    }
+
+    fn init_lost_found(&mut self) {
+        let now = Utc::now().timestamp() as u32;
+        LoHiMut::new(&mut self.i_uid, &mut self.l_i_uid_high).set(ROOT_USER_ID);
+        LoHiMut::new(&mut self.i_gid, &mut self.l_i_gid_high).set(ROOT_GROUP_ID);
+        self.i_mode = DEFAULT_RWX | DIR_FLAG;
+        self.i_crtime = 0;
+        self.i_atime = now;
+        self.i_mtime = now;
+        self.i_ctime = now;
+        self.i_links_count = 1;
+        self.i_flags = INODE_USES_EXTENTS;
+        self.init_extent_header();
+    }
+
+    fn init_root(&mut self) {
+        let now = Utc::now().timestamp() as u32;
+        let user_id = u32::from(geteuid());
+        let group_id = u32::from(getegid());
+        LoHiMut::new(&mut self.i_uid, &mut self.l_i_uid_high).set(user_id);
+        LoHiMut::new(&mut self.i_gid, &mut self.l_i_gid_high).set(group_id);
+        self.i_mode = DEFAULT_RWX | DIR_FLAG;
+        self.i_crtime = 0;
+        self.i_atime = now;
+        self.i_mtime = now;
+        self.i_ctime = now;
+        self.i_links_count = 0;
+        self.i_flags = INODE_USES_EXTENTS;
+        self.init_extent_header();
+    }
+
+    fn init_extent_header(&mut self) {
+        self.extents[0].header = ExtentHeader::new(EXTENT_ENTRIES_IN_INODE as u16);
     }
 }

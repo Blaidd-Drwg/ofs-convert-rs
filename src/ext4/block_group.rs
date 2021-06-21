@@ -2,11 +2,11 @@ use std::ops::Range;
 use std::slice;
 
 use crate::bitmap::Bitmap;
-use crate::ext4::{Ext4GroupDescriptor, HasSuperBlock, InodeInner, SuperBlock};
+use crate::ext4::{Ext4GroupDescriptor, HasSuperBlock, InodeInner, SuperBlock, FIRST_EXISTING_INODE};
 use crate::fat::ClusterIdx;
 
 const FIRST_SUPERBLOCK_OFFSET: usize = 1024;
-const FIRST_NON_RESERVED_INODE: usize = 11;
+pub const FIRST_NON_RESERVED_INODE: u32 = 11;
 
 
 pub struct BlockGroup<'a> {
@@ -14,20 +14,23 @@ pub struct BlockGroup<'a> {
     pub gdt: Option<&'a mut [Ext4GroupDescriptor]>,
     pub data_block_bitmap: &'a mut [u8],
     pub inode_bitmap: &'a mut [u8],
-    pub inode_table: &'a mut [InodeInner],
+    pub inode_table_ptr: *mut u8,
+    pub inode_table_len: usize,
 }
 
 impl<'a> BlockGroup<'a> {
     pub unsafe fn new(partition_ptr: *mut u8, info: Ext4BlockGroupConstructionInfo) -> Self {
         let start_byte = info.start_block as usize * info.block_size as usize;
         let block_group_ptr = partition_ptr.add(start_byte);
+        let (inode_table_ptr, inode_table_len) = Self::init_inode_table(block_group_ptr, info);
 
         Self {
             superblock: Self::init_superblock(block_group_ptr, info),
             gdt: Self::init_gdt(block_group_ptr, info),
             data_block_bitmap: Self::init_data_block_bitmap(block_group_ptr, info),
             inode_bitmap: Self::init_inode_bitmap(block_group_ptr, info),
-            inode_table: Self::init_inode_table(block_group_ptr, info),
+            inode_table_ptr,
+            inode_table_len,
         }
     }
 
@@ -98,15 +101,12 @@ impl<'a> BlockGroup<'a> {
         inode_bitmap
     }
 
-    unsafe fn init_inode_table<'b>(
-        block_group_ptr: *mut u8,
-        info: Ext4BlockGroupConstructionInfo,
-    ) -> &'b mut [InodeInner] {
+    unsafe fn init_inode_table(block_group_ptr: *mut u8, info: Ext4BlockGroupConstructionInfo) -> (*mut u8, usize) {
         let start_byte = info.relative_inode_table_start_block * info.block_size;
         let ptr = block_group_ptr.add(start_byte as usize);
-        let blocks = slice::from_raw_parts_mut(ptr, info.block_size as usize * info.inode_table_block_count);
-        blocks.fill(0);
-        blocks.align_to_mut::<InodeInner>().1
+        let table = slice::from_raw_parts_mut(ptr, info.block_size as usize * info.inode_table_block_count);
+        table.fill(0);
+        (table.as_mut_ptr(), table.len())
     }
 
     pub fn mark_relative_range_as_used(&mut self, relative_range: Range<ClusterIdx>) {
@@ -114,6 +114,26 @@ impl<'a> BlockGroup<'a> {
         for block_idx in relative_range {
             bitmap.set(block_idx as usize);
         }
+    }
+
+    pub fn allocate_relative_inode(&mut self, relative_inode_no: usize, inode_size: usize) -> &'a mut InodeInner {
+        let mut bitmap = Bitmap { data: self.inode_bitmap };
+        assert!(
+            !bitmap.get(relative_inode_no),
+            "Tried to allocate used inode with relative index {}",
+            relative_inode_no
+        );
+
+        bitmap.set(relative_inode_no);
+        unsafe { self.get_relative_inode(relative_inode_no, inode_size) }
+    }
+
+    /// SAFETY: TODO if somebody has borrow on same inode, undefined behavior
+    pub unsafe fn get_relative_inode(&mut self, relative_inode_no: usize, inode_size: usize) -> &'a mut InodeInner {
+        let offset = relative_inode_no * inode_size;
+        assert!(offset + inode_size <= self.inode_table_len);
+        let ptr = self.inode_table_ptr.add(offset) as *mut InodeInner;
+        &mut *ptr
     }
 }
 
@@ -162,7 +182,7 @@ impl Ext4BlockGroupConstructionInfo {
             block_size: superblock.block_size(),
             overhead: superblock.block_group_overhead(has_superblock),
             used_inode_count: if block_group_idx == 0 {
-                FIRST_NON_RESERVED_INODE
+                FIRST_NON_RESERVED_INODE as usize - FIRST_EXISTING_INODE as usize
             } else {
                 0
             },

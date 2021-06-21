@@ -1,14 +1,22 @@
 use std::ops::Range;
 
+use num::Integer;
+
 use crate::allocator::Allocator;
-use crate::c_wrapper::{c_add_extent, c_build_inode, c_build_lost_found_inode, c_build_root_inode};
-use crate::ext4::{BlockGroup, Ext4BlockGroupConstructionInfo, Ext4GroupDescriptor, Extent, Inode, SuperBlock};
-use crate::fat::{BootSector, ClusterIdx, FatDentry};
+use crate::c_wrapper::{c_add_extent, c_add_inode};
+use crate::ext4::{
+    BlockGroup, Ext4BlockGroupConstructionInfo, Ext4GroupDescriptor, Extent, Inode, SuperBlock, EXT4_LOST_FOUND_INODE,
+    EXT4_ROOT_INODE, FIRST_NON_RESERVED_INODE,
+};
+use crate::fat::{BootSector, ClusterIdx};
+
+pub const FIRST_EXISTING_INODE: u32 = 1;
 
 pub struct Ext4Partition<'a> {
     // padding: &'a mut [u8; GROUP_0_PADDING as usize],
     start: *const u8, // temporary
     block_groups: Vec<BlockGroup<'a>>,
+    next_free_inode_no: u32,
 }
 
 impl<'a> Ext4Partition<'a> {
@@ -29,7 +37,11 @@ impl<'a> Ext4Partition<'a> {
             .as_deref_mut()
             .unwrap()
             .copy_from_slice(&block_group_descriptors);
-        Self { start: partition_ptr, block_groups }
+        Self {
+            start: partition_ptr,
+            block_groups,
+            next_free_inode_no: FIRST_NON_RESERVED_INODE,
+        }
     }
 
     pub fn superblock(&self) -> &SuperBlock {
@@ -47,18 +59,6 @@ impl<'a> Ext4Partition<'a> {
     // temporary
     pub fn as_ptr(&self) -> *const u8 {
         self.start
-    }
-
-    pub fn build_inode(&mut self, dentry: &FatDentry) -> Inode<'a> {
-        c_build_inode(dentry)
-    }
-
-    pub fn build_root_inode(&mut self) -> Inode<'a> {
-        c_build_root_inode()
-    }
-
-    pub fn build_lost_found_inode(&mut self) -> Inode<'a> {
-        c_build_lost_found_inode()
     }
 
     pub fn set_extents(&mut self, inode: &mut Inode, extents: Vec<Range<ClusterIdx>>, allocator: &Allocator<'_>) {
@@ -98,6 +98,41 @@ impl<'a> Ext4Partition<'a> {
         let group_start_block = self.superblock_mut().block_group_start_cluster(block_group_idx);
         let relative_range = range.start - group_start_block..range.end - group_start_block;
         self.block_groups[block_group_idx].mark_relative_range_as_used(relative_range);
+    }
+
+    pub unsafe fn build_root_inode(&mut self) -> Inode<'a> {
+        let inode_no = EXT4_ROOT_INODE;
+        let existing_inode_no = inode_no - FIRST_EXISTING_INODE;
+        let inode_size = self.superblock().s_inode_size as usize;
+        let inner = self.block_groups[0].get_relative_inode(existing_inode_no as usize, inode_size);
+        let mut inode = Inode { inode_no, inner };
+        inode.init_root();
+        c_add_inode(inode_no, true);
+        inode
+    }
+
+    pub fn build_lost_found_inode(&mut self) -> Inode<'a> {
+        let mut inode = self.allocate_inode(true);
+        assert_eq!(inode.inode_no, EXT4_LOST_FOUND_INODE);
+        inode.init_lost_found();
+        inode
+    }
+
+    /// Inode 11 is not officially reserved for the lost+found directory, but fsck complains if it's not there.
+    /// Therefore, the inode returned by the first call to `allocate_inode` should be used for lost+found.
+    pub fn allocate_inode(&mut self, is_dir: bool) -> Inode<'a> {
+        let inode_no = self.next_free_inode_no;
+        let inode_size = self.superblock().s_inode_size as usize;
+        self.next_free_inode_no += 1;
+
+        let existing_inode_no = inode_no - FIRST_EXISTING_INODE;
+        let (block_group_idx, relative_inode_no) = existing_inode_no.div_rem(&self.superblock().s_inodes_per_group);
+        let block_group = &mut self.block_groups[block_group_idx as usize];
+        let inner = block_group.allocate_relative_inode(relative_inode_no as usize, inode_size);
+
+        c_add_inode(inode_no, is_dir);
+
+        Inode { inode_no, inner }
     }
 }
 

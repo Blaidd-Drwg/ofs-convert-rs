@@ -10,7 +10,6 @@ mod partition;
 mod ranges;
 mod serialization;
 mod util;
-// mod allocator;
 
 use std::env::args;
 use std::io;

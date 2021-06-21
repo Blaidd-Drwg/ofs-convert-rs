@@ -58,6 +58,7 @@ pub struct SuperBlock {
     pub s_def_resuid: u16,
     pub s_def_resgid: u16,
     pub s_first_ino: u32,
+    /// >= size_of::<InodeInner>()
     pub s_inode_size: u16,
     pub s_block_group_nr: u16,
     pub s_feature_compat: u32,

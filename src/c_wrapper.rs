@@ -1,17 +1,16 @@
 use std::convert::{TryFrom, TryInto};
-use std::ffi::c_void;
 
-use crate::ext4::{Inode, SuperBlock, EXT4_LOST_FOUND_INODE, EXT4_ROOT_INODE};
-use crate::fat::{BootSector, Extent, FatDentry};
+use crate::ext4::{Inode, SuperBlock};
+use crate::fat::{BootSector, Extent};
 
 mod ffi {
     use crate::ext4::{InodeInner, SuperBlock};
-    use crate::fat::{BootSector, FatDentry};
-
-    pub type AllocatorData = *mut ::std::os::raw::c_void;
-    pub type AllocatorFunc = unsafe extern "C" fn(arg1: AllocatorData) -> u32;
+    use crate::fat::BootSector;
 
     extern "C" {
+        #[link_name = "\u{1}_Z9add_inodejb"]
+        pub fn add_inode(inode_num: u32, is_dir: bool);
+
         #[link_name = "\u{1}_Z10initializePh16ext4_super_block11boot_sector"]
         pub fn initialize(fs_start: *mut u8, _sb: SuperBlock, _boot_sector: BootSector);
 
@@ -24,14 +23,8 @@ mod ffi {
         #[link_name = "\u{1}_Z18get_existing_inodej"]
         pub fn get_existing_inode(inode_no: u32) -> *mut InodeInner;
 
-        #[link_name = "\u{1}_Z11build_inodePK10fat_dentry"]
-        pub fn build_inode(dentry: *const FatDentry) -> u32;
-
         #[link_name = "\u{1}_Z16build_root_inodev"]
         pub fn build_root_inode();
-
-        #[link_name = "\u{1}_Z22build_lost_found_inodev"]
-        pub fn build_lost_found_inode();
 
         #[link_name = "\u{1}_Z15register_extentmmj"]
         pub fn register_extent(extent_start_block: u64, extent_len: u64, inode_no: u32);
@@ -75,41 +68,15 @@ pub unsafe fn c_end_writing() {
     ffi::end_writing();
 }
 
-fn wrap_allocator_callback<F>(allocator_callback: &mut F) -> (ffi::AllocatorFunc, ffi::AllocatorData)
-where F: FnMut() -> u32 {
-    extern "C" fn callback_wrapper<F>(closure_ptr: *mut c_void) -> u32
-    where F: FnMut() -> u32 {
-        let closure = closure_ptr as *mut F;
-        unsafe { (*closure)() }
-    }
-    let allocator_data = allocator_callback as *mut _ as ffi::AllocatorData;
-    (callback_wrapper::<F>, allocator_data)
-}
-
 pub fn c_add_extent(inode_no: u32, extent_start: u32, len: u16) {
     unsafe {
         ffi::register_extent(extent_start as u64, len as u64, inode_no);
     }
 }
 
-pub fn c_build_root_inode() -> Inode<'static> {
+pub fn c_add_inode(inode_no: u32, is_dir: bool) {
     unsafe {
-        ffi::build_root_inode();
-    }
-    c_get_inode(EXT4_ROOT_INODE)
-}
-
-pub fn c_build_lost_found_inode() -> Inode<'static> {
-    unsafe {
-        ffi::build_lost_found_inode();
-    }
-    c_get_inode(EXT4_LOST_FOUND_INODE)
-}
-
-pub fn c_build_inode(f_dentry: &FatDentry) -> Inode<'static> {
-    unsafe {
-        let inode_no = ffi::build_inode(f_dentry as *const FatDentry);
-        c_get_inode(inode_no)
+        ffi::add_inode(inode_no, is_dir);
     }
 }
 

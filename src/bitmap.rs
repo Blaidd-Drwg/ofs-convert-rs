@@ -20,10 +20,6 @@ impl<'a> Bitmap<'a> {
         self.data[data_idx] & (1 << bit_idx) != 0
     }
 
-    pub fn clear_all(&mut self) {
-        self.data.fill(0);
-    }
-
     pub fn len(&self) -> usize {
         self.data.len() * 8
     }
