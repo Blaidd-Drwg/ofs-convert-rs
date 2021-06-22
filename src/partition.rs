@@ -10,9 +10,7 @@ use fs2::FileExt;
 use memmap::{MmapMut, MmapOptions};
 use nix::ioctl_read;
 
-// TODO check whether file is a FAT partition? although this will be hard to check if we can't rely on fsck.fat
 // TODO macos support
-// TODO make file process-private through unlinking?
 pub struct Partition<'a> {
     mmap: MmapMut,
     pub lifetime: PhantomData<&'a ()>,

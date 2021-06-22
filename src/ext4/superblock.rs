@@ -4,30 +4,38 @@ use std::io;
 use num::Integer;
 use uuid::Uuid;
 
+use crate::ext4::{FIRST_BLOCK_PADDING, FIRST_NON_RESERVED_INODE};
 use crate::fat::{BootSector, ClusterIdx};
 use crate::lohi::{LoHi, LoHiMut};
 use crate::ranges::Ranges;
 
-pub const EXT4_ROOT_INODE: u32 = 2;
-pub const EXT4_LOST_FOUND_INODE: u32 = 11;
-const EXT4_FIRST_NON_RSV_INODE: u32 = 11;
-const EXT4_MAGIC: u16 = 61267;
-const EXT4_STATE_CLEANLY_UNMOUNTED: u16 = 1;
-const EXT4_DYNAMIC_REV: u32 = 1;
-const EXT4_BLOCK_SIZE_MIN_LOG2: u32 = 10;
-const EXT4_64BIT_DESC_SIZE: u16 = 64;
-const EXT4_ERRORS_DEFAULT: u16 = 1;
-const EXT4_FEATURE_COMPAT_SPARSE_SUPER2: u32 = 512;
-const EXT4_FEATURE_INCOMPAT_EXTENTS: u32 = 64;
-const EXT4_FEATURE_INCOMPAT_64BIT: u32 = 128;
-const EXT4_INODE_RATIO: u32 = 16384;
-const EXT4_INODE_SIZE: u16 = 256;
+pub const ROOT_INODE_NO: u32 = 2;
+pub const LOST_FOUND_INODE_NO: u32 = 11;
+
+const SUPERBLOCK_MAGIC: u16 = 61267;
+const STATE_CLEANLY_UNMOUNTED: u16 = 1;
+const NEWEST_REVISION: u32 = 1;
+const BLOCK_SIZE_MIN_LOG2: u32 = 10;
+const DESC_SIZE_64BIT: u16 = 64;
+const ERRORS_DEFAULT: u16 = 1;
+const FEATURE_COMPAT_SPARSE_SUPER2: u32 = 512;
+const FEATURE_INCOMPAT_EXTENTS: u32 = 64;
+const FEATURE_INCOMPAT_64BIT: u32 = 128;
+const INODE_RATIO: u32 = 16384;
+const INODE_SIZE: u16 = 256;
+const VOLUME_NAME_LEN: usize = 16;
 // Simplified because we don't use clusters
-const EXT4_MAX_BLOCKS_PER_GROUP: u32 = (1 << 16) - 8;
-pub const GROUP_0_PADDING: u64 = 1024;
-const MIN_GROUP_BLOCK_COUNT: u64 = 50; // the lowest number of data blocks a block group can have
+const MAX_BLOCKS_PER_GROUP: u32 = (1 << 16) - 8;
+// Chosen for practicality, not actually enforced
+const MIN_USABLE_BLOCKS_PER_GROUP: u64 = 10;
 const MIN_BLOCK_SIZE: usize = 1024;
 
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub enum HasSuperBlock {
+    YesOriginal,
+    YesBackup,
+    No,
+}
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -65,7 +73,7 @@ pub struct SuperBlock {
     pub s_feature_incompat: u32,
     pub s_feature_ro_compat: u32,
     pub s_uuid: [u8; 16],
-    pub s_volume_name: [u8; 16],
+    pub s_volume_name: [u8; VOLUME_NAME_LEN],
     pub s_last_mounted: [u8; 64],
     pub s_algorithm_usage_bitmap: u32,
     pub s_prealloc_blocks: u8,
@@ -138,12 +146,21 @@ impl SuperBlock {
             ));
         }
 
+        Self::new(
+            boot_sector.partition_size(),
+            boot_sector.cluster_size(),
+            boot_sector.volume_label(),
+        )
+    }
+
+    pub fn new(partition_len: u64, block_size: usize, volume_label: &[u8]) -> io::Result<Self> {
+        assert!(volume_label.len() <= VOLUME_NAME_LEN);
+
         // SAFETY: This allows us to skip initializing a ton of fields to zero, but
         // CAUTION: some initialization steps rely on other fields already having been set,
         // so pay attention when refactoring/reordering steps.
         let mut sb: Self = unsafe { std::mem::zeroed() };
 
-        let block_size = boot_sector.cluster_size();
         if block_size < MIN_BLOCK_SIZE {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -158,24 +175,23 @@ impl SuperBlock {
                 "FAT cluster size is not a power of 2",
             ));
         }
-        sb.s_log_block_size = log_block_size - EXT4_BLOCK_SIZE_MIN_LOG2;
+        sb.s_log_block_size = log_block_size - BLOCK_SIZE_MIN_LOG2;
         // check whether the entire first block is padding
-        sb.s_first_data_block = if block_size as u64 <= GROUP_0_PADDING { 1 } else { 0 };
-        sb.s_blocks_per_group = EXT4_MAX_BLOCKS_PER_GROUP.min(block_size as u32 * 8);
+        sb.s_first_data_block = if block_size <= FIRST_BLOCK_PADDING { 1 } else { 0 };
+        sb.s_blocks_per_group = MAX_BLOCKS_PER_GROUP.min(block_size as u32 * 8);
 
-        sb.s_magic = EXT4_MAGIC;
-        sb.s_state = EXT4_STATE_CLEANLY_UNMOUNTED;
-        sb.s_feature_compat = EXT4_FEATURE_COMPAT_SPARSE_SUPER2;
-        sb.s_feature_incompat = EXT4_FEATURE_INCOMPAT_64BIT | EXT4_FEATURE_INCOMPAT_EXTENTS;
-        sb.s_desc_size = EXT4_64BIT_DESC_SIZE;
-        sb.s_inode_size = EXT4_INODE_SIZE;
-        sb.s_rev_level = EXT4_DYNAMIC_REV;
-        sb.s_errors = EXT4_ERRORS_DEFAULT;
-        sb.s_first_ino = EXT4_FIRST_NON_RSV_INODE;
+        sb.s_magic = SUPERBLOCK_MAGIC;
+        sb.s_state = STATE_CLEANLY_UNMOUNTED;
+        sb.s_feature_compat = FEATURE_COMPAT_SPARSE_SUPER2;
+        sb.s_feature_incompat = FEATURE_INCOMPAT_64BIT | FEATURE_INCOMPAT_EXTENTS;
+        sb.s_desc_size = DESC_SIZE_64BIT;
+        sb.s_inode_size = INODE_SIZE;
+        sb.s_rev_level = NEWEST_REVISION;
+        sb.s_errors = ERRORS_DEFAULT;
+        sb.s_first_ino = FIRST_NON_RESERVED_INODE;
         sb.s_max_mnt_count = u16::MAX;
         sb.s_mkfs_time = u32::try_from(chrono::Utc::now().timestamp()).unwrap();
         sb.s_uuid = *Uuid::new_v4().as_bytes();
-        let volume_label = boot_sector.volume_label();
         sb.s_volume_name[0..volume_label.len()].clone_from_slice(volume_label);
 
         // These have to have these values even if bigalloc is disabled
@@ -184,8 +200,7 @@ impl SuperBlock {
 
         // This is the same logic as used by mke2fs to determine the inode count
         let min_inodes_per_group = block_size as u32 * 8; // Inodes per group need to fit into a one page bitmap
-        sb.s_inodes_per_group =
-            min_inodes_per_group.min(sb.s_blocks_per_group * (block_size as u32) / EXT4_INODE_RATIO);
+        sb.s_inodes_per_group = min_inodes_per_group.min(sb.s_blocks_per_group * (block_size as u32) / INODE_RATIO);
 
         // Same logic as used in mke2fs: If the last block group would have
         // fewer than 50 data blocks, then reduce the block count and ignore the
@@ -195,9 +210,8 @@ impl SuperBlock {
         // `block_size` * 8, but this is easier to implement.
         // We use the sparse_super2 logic from mke2fs, meaning that the last block
         // group always has a super block copy.
-        // TODO can it happen that block_count becomes zero?
         // TODO we would have to move data the falls outside of the bg into a bg, do we do that?
-        let mut block_count = boot_sector.partition_size() / u64::try_from(block_size).unwrap();
+        let mut block_count = partition_len / u64::try_from(block_size).unwrap();
         let mut data_block_count = block_count - sb.s_first_data_block as u64;
         // set the intermediate value in `sb` because it is needed by the call to `sb.block_group_overhead`.
         LoHiMut::new(&mut sb.s_blocks_count_lo, &mut sb.s_blocks_count_hi).set(block_count);
@@ -205,11 +219,20 @@ impl SuperBlock {
 
         // method call requires `s_reserved_gdt_blocks`, `s_log_block_size`, `s_desc_size`, `s_inodes_per_group`,
         // `s_inode_size`, `s_blocks_per_group`, `s_blocks_count_hi` and `s_blocks_count_lo` to be already set
-        if last_group_block_count < sb.block_group_overhead(HasSuperBlock::YesBackup) + MIN_GROUP_BLOCK_COUNT {
+        if last_group_block_count < sb.block_group_overhead(HasSuperBlock::YesBackup) + MIN_USABLE_BLOCKS_PER_GROUP {
             block_count -= last_group_block_count;
             data_block_count -= last_group_block_count;
-            assert_ne!(data_block_count, 0);
             LoHiMut::new(&mut sb.s_blocks_count_lo, &mut sb.s_blocks_count_hi).set(block_count);
+        }
+
+        if data_block_count == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "Partition too small, it would have fewer than {} usable blocks.",
+                    MIN_USABLE_BLOCKS_PER_GROUP
+                ),
+            ));
         }
 
         // Same logic as in mke2fs
@@ -226,7 +249,6 @@ impl SuperBlock {
         Ok(sb)
     }
 
-    // should I call bg has super from here instead?
     pub fn block_group_overhead(&self, has_superblock: HasSuperBlock) -> u64 {
         // block bitmap + inode bitmap + inode table
         let default_overhead = 2 + self.inode_table_block_count();
@@ -244,15 +266,8 @@ impl SuperBlock {
     }
 
     fn gdt_block_count(&self) -> u64 {
-        // TODO
-        // block size;
-        // desc size;
-        // bg count;
-        // bg count * desc size = gdt size;
-        // / block = gdt block count
-
-        let descriptors_that_fit_into_a_block = self.block_size() / u64::from(self.s_desc_size);
-        self.block_group_count().div_ceil(&descriptors_that_fit_into_a_block)
+        let descriptors_per_gdt_block = self.block_size() / u64::from(self.s_desc_size);
+        self.block_group_count().div_ceil(&descriptors_per_gdt_block)
     }
 
     pub fn inode_table_block_count(&self) -> u64 {
@@ -261,7 +276,7 @@ impl SuperBlock {
     }
 
     pub fn block_size(&self) -> u64 {
-        1 << (self.s_log_block_size + EXT4_BLOCK_SIZE_MIN_LOG2)
+        1 << (self.s_log_block_size + BLOCK_SIZE_MIN_LOG2)
     }
 
     /// Includes a possible first padding block that does not belong to any block group
@@ -287,14 +302,15 @@ impl SuperBlock {
         }
     }
 
-    // Caution: if the block size is 1024, every block group begins one block later than normal
+    // if the block size is FIRST_BLOCK_PADDING, every block group begins one block later than normal
     pub fn block_group_start_cluster(&self, block_group_idx: usize) -> ClusterIdx {
         self.s_blocks_per_group * block_group_idx as u32 + self.s_first_data_block
     }
 
+    /// Returns the block ranges that contain filesystem metadata, i.e. the ones occupied by the fields of `BlockGroup`.
     pub fn block_group_overhead_ranges(&self) -> Ranges<ClusterIdx> {
         let mut overhead_ranges = Vec::new();
-        if self.block_size() <= GROUP_0_PADDING {
+        if self.block_size() <= FIRST_BLOCK_PADDING as u64 {
             // the entire first block is padding
             overhead_ranges.push(0..1);
         }
@@ -313,11 +329,4 @@ impl SuperBlock {
     pub fn set_free_blocks_count(&mut self, count: u64) {
         LoHiMut::new(&mut self.s_free_blocks_count_lo, &mut self.s_free_blocks_count_hi).set(count);
     }
-}
-
-#[derive(PartialEq, Clone, Copy, Debug)]
-pub enum HasSuperBlock {
-    YesOriginal,
-    YesBackup,
-    No,
 }

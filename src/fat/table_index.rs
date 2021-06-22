@@ -48,7 +48,6 @@ impl FatTableIndex {
         self.0 == 0
     }
 
-    // TODO move to struct FatTable
     /// True if `self.0` is a special value representing a free cluster.
     pub fn is_free(self) -> bool {
         const FREE_CLUSTER: u32 = 0;

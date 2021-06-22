@@ -119,7 +119,6 @@ struct DentryWriter<'a> {
     block_count: usize,
 }
 
-// TODO InodeIdx like AllocatedClusterIdx and shared borrow in struct instead of passing through mut borrow?
 impl<'a> DentryWriter<'a> {
     pub fn new(mut inode: Inode<'a>, allocator: Rc<Allocator<'a>>, partition: &mut Ext4Partition) -> Self {
         let block = allocator.allocate_one();

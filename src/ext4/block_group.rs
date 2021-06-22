@@ -2,12 +2,11 @@ use std::ops::Range;
 use std::slice;
 
 use crate::bitmap::Bitmap;
-use crate::ext4::{Ext4GroupDescriptor, HasSuperBlock, InodeInner, SuperBlock, FIRST_EXISTING_INODE};
+use crate::ext4::{
+    Ext4GroupDescriptor, HasSuperBlock, InodeInner, SuperBlock, FIRST_BLOCK_PADDING, FIRST_EXISTING_INODE,
+    FIRST_NON_RESERVED_INODE,
+};
 use crate::fat::ClusterIdx;
-
-const FIRST_SUPERBLOCK_OFFSET: usize = 1024;
-pub const FIRST_NON_RESERVED_INODE: u32 = 11;
-
 
 pub struct BlockGroup<'a> {
     pub superblock: Option<&'a mut SuperBlock>,
@@ -40,10 +39,10 @@ impl<'a> BlockGroup<'a> {
     ) -> Option<&'b mut SuperBlock> {
         match info.has_superblock {
             HasSuperBlock::YesOriginal => {
-                let superblock_ptr = if info.block_size as usize == FIRST_SUPERBLOCK_OFFSET {
+                let superblock_ptr = if info.block_size as usize == FIRST_BLOCK_PADDING {
                     block_group_ptr as *mut SuperBlock
                 } else {
-                    block_group_ptr.add(FIRST_SUPERBLOCK_OFFSET) as *mut SuperBlock
+                    block_group_ptr.add(FIRST_BLOCK_PADDING) as *mut SuperBlock
                 };
                 Some(&mut *superblock_ptr)
             }
@@ -128,7 +127,7 @@ impl<'a> BlockGroup<'a> {
         unsafe { self.get_relative_inode(relative_inode_no, inode_size) }
     }
 
-    /// SAFETY: TODO if somebody has borrow on same inode, undefined behavior
+    /// SAFETY: Undefined behavior if the function is called twice with the same `relative_inode_no`.
     pub unsafe fn get_relative_inode(&mut self, relative_inode_no: usize, inode_size: usize) -> &'a mut InodeInner {
         let offset = relative_inode_no * inode_size;
         assert!(offset + inode_size <= self.inode_table_len);

@@ -3,20 +3,21 @@ use std::marker::PhantomData;
 use std::ops::Range;
 use std::{io, slice};
 
+
 use crate::fat::ClusterIdx;
 use crate::ranges::{NotCoveredRange, Ranges};
 
 // TODO after reading, make directory dataclusters free
 // TODO ensure DataClusterIdx can also not be constructed
-/// An `AllocatedClusterIdx` represents a cluster that was allocated by `Allocator` and functions as a token to access
-/// that cluster, either through the `Allocator` itself or through the `AllocatedReader` derived from it. Invariant: no
-/// two `AllocatedClusterIdx` can have the same value; otherwise, `Allocator::cluster_mut` might alias.
+/// An `AllocatedClusterIdx` represents a cluster that was allocated by an `Allocator` and functions as a token to
+/// access that cluster, either through the `Allocator` itself or through the `AllocatedReader` derived from it.
+/// Invariant: no two `AllocatedClusterIdx` may have the same value; otherwise, `Allocator::cluster_mut` might alias.
 #[derive(PartialEq, PartialOrd)]
 pub struct AllocatedClusterIdx(ClusterIdx);
 impl AllocatedClusterIdx {
-    /// SAFETY: Instantiating an `AllocatedClusterIdx` breaks the invariant! To avoid aliasing, the caller must ensure
-    /// that `idx` was originally created from an `AllocatedClusterIdx` and that the original and the clone are not used
-    /// to access a cluster simultaneously.
+    /// SAFETY: Instantiating an `AllocatedClusterIdx` might break the invariant! To avoid aliasing, the caller must
+    /// ensure that `idx` was originally created from an `AllocatedClusterIdx` and that the original and the clone are
+    /// not used to access a cluster simultaneously.
     pub unsafe fn new(idx: ClusterIdx) -> Self {
         Self(idx)
     }
@@ -46,8 +47,8 @@ impl From<AllocatedClusterIdx> for usize {
     }
 }
 
-/// A newtype that can only be instantiated by Allocator to ensure that a range of `AllocatedClusterIdx` can only be
-/// used as an iterator if every cluster in that range has indeed been allocated.
+/// A newtype that can only be instantiated by an `Allocator` to ensure that a range of `AllocatedClusterIdx` can only
+/// be used as an iterator if every cluster in that range has indeed been allocated.
 pub struct AllocatedRange(Range<AllocatedClusterIdx>);
 
 impl AllocatedRange {
@@ -87,12 +88,10 @@ impl Iterator for AllocatedIterMut<'_> {
     }
 }
 
-// TODO modify to allow borrowing different clusters at the same time
 /// Allocates clusters that are not marked as in use (specifically, clusters that are marked as
 /// free in the FAT and which will not be overwritten by Ext4 block group metadata). Callers are
 /// guaranteed that a cluster allocated to them will not be accessed anywhere else. They can access
-/// such a cluster through the methods `cluster` and `cluster_mut`. The current implementation
-/// panics if any two clusters are borrowed at the same time, which is kinda whack tbh.
+/// such a cluster through the methods `cluster` and `cluster_mut`.
 #[derive(Debug)]
 pub struct Allocator<'a> {
     partition_ptr: *mut u8,
@@ -111,7 +110,7 @@ pub struct Allocator<'a> {
 
 impl<'a> Allocator<'a> {
     /// SAFETY: Instantiating more than one `Allocator` can lead to undefined behavior, as mixing `AllocatedClusterIdx`
-    /// allocated by different `Allocator`s can lead to aliasing
+    /// allocated by different `Allocator`s can lead to aliasing.
     pub unsafe fn new(
         partition_ptr: *mut u8,
         partition_len: usize,
@@ -246,8 +245,7 @@ impl<'a> AllocatedReader<'a> {
     pub fn cluster(&self, idx: AllocatedClusterIdx) -> &'a [u8] {
         let start_byte = self.cluster_size * usize::from(idx);
         assert!(start_byte + self.cluster_size <= self.partition_len);
-        // SAFETY: The data is valid and since `idx` is unique and we borrowed it mutably, nobody else can mutate the
-        // data.
+        // SAFETY: The data is valid and since `idx` is unique and we borrowed it, nobody can mutate the data.
         unsafe { slice::from_raw_parts(self.partition_ptr.add(start_byte), self.cluster_size) }
     }
 }

@@ -17,10 +17,10 @@ use std::mem::size_of;
 use static_assertions::const_assert;
 
 use crate::ext4::SuperBlock;
+use crate::fat::FatPartition;
 use crate::partition::Partition;
 use crate::serialization::FatTreeSerializer;
 
-// u32 must fit into usize
 const_assert!(size_of::<usize>() >= size_of::<u32>());
 
 fn main() {
@@ -49,9 +49,9 @@ fn print_help() {
 unsafe fn ofs_convert(partition_path: &str) -> io::Result<()> {
     let mut partition = Partition::open(partition_path)?;
     let (fat_partition, mut allocator) =
-        fat::FatPartition::new_with_allocator(partition.as_mut_ptr(), partition.len(), partition.lifetime);
-    let boot_sector = *fat_partition.boot_sector();
-    let superblock = SuperBlock::from(&boot_sector)?;
+        FatPartition::new_with_allocator(partition.as_mut_ptr(), partition.len(), partition.lifetime);
+    let boot_sector = fat_partition.boot_sector();
+    let superblock = SuperBlock::from(boot_sector)?;
     let forbidden_ranges = superblock.block_group_overhead_ranges();
     for range in &forbidden_ranges {
         allocator.forbid(range.clone());
@@ -60,8 +60,9 @@ unsafe fn ofs_convert(partition_path: &str) -> io::Result<()> {
     let mut serializer = FatTreeSerializer::new(allocator, fat_partition.cluster_size() as usize, forbidden_ranges);
     serializer.serialize_directory_tree(&fat_partition);
 
-    let mut deserializer = serializer.into_deserializer();
+    // This step makes the FAT partition inconsistent
     let mut ext4_partition = fat_partition.into_ext4();
+    let mut deserializer = serializer.into_deserializer();
     deserializer.deserialize_directory_tree(&mut ext4_partition);
 
     Ok(())

@@ -4,19 +4,21 @@ use num::Integer;
 
 use crate::allocator::Allocator;
 use crate::ext4::{
-    BlockGroup, Ext4BlockGroupConstructionInfo, Ext4GroupDescriptor, Extent, Inode, SuperBlock, EXT4_LOST_FOUND_INODE,
-    EXT4_ROOT_INODE, FIRST_NON_RESERVED_INODE,
+    BlockGroup, Ext4BlockGroupConstructionInfo, Ext4GroupDescriptor, Extent, Inode, SuperBlock, FIRST_EXISTING_INODE,
+    FIRST_NON_RESERVED_INODE, LOST_FOUND_INODE_NO, ROOT_INODE_NO,
 };
 use crate::fat::{BootSector, ClusterIdx};
 
-pub const FIRST_EXISTING_INODE: u32 = 1;
-
 pub struct Ext4Partition<'a> {
     block_groups: Vec<BlockGroup<'a>>,
+    /// Used for allocating inodes
     next_free_inode_no: u32,
 }
 
 impl<'a> Ext4Partition<'a> {
+    /// SAFETY: Safe if `partition_ptr` is valid for reads for `boot_sector.partition_len()` many bytes, and no memory
+    /// belonging to a blocks in `superblock.block_group_overhead_ranges()` is dereferenced for the duration of the
+    /// lifetime `'a`.
     pub unsafe fn from(partition_ptr: *mut u8, boot_sector: &BootSector) -> Self {
         let superblock = SuperBlock::from(boot_sector).unwrap();
         let mut block_groups = Vec::new();
@@ -90,7 +92,7 @@ impl<'a> Ext4Partition<'a> {
     }
 
     pub unsafe fn build_root_inode(&mut self) -> Inode<'a> {
-        let inode_no = EXT4_ROOT_INODE;
+        let inode_no = ROOT_INODE_NO;
         let existing_inode_no = inode_no - FIRST_EXISTING_INODE;
         let inode_size = self.superblock().s_inode_size as usize;
         let inner = self.block_groups[0].get_relative_inode(existing_inode_no as usize, inode_size);
@@ -105,7 +107,7 @@ impl<'a> Ext4Partition<'a> {
 
     pub fn build_lost_found_inode(&mut self) -> Inode<'a> {
         let mut inode = self.allocate_inode(true);
-        assert_eq!(inode.inode_no, EXT4_LOST_FOUND_INODE);
+        assert_eq!(inode.inode_no, LOST_FOUND_INODE_NO);
         inode.init_lost_found();
         inode
     }

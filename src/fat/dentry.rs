@@ -94,7 +94,6 @@ impl FatDentry {
         self.short_name_case & 0x10 != 0
     }
 
-    // TODO what encoding do FAT short names use?  Assume ascii for now
     pub fn read_short_file_name(&self) -> String {
         let name_ascii_bytes: Vec<_> = self.short_name.iter().copied().collect();
         let mut name_string = String::from_utf8(name_ascii_bytes).unwrap().trim_end().to_string();

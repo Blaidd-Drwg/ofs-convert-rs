@@ -7,8 +7,6 @@ use crate::fat::{ClusterIdx, FatDentry};
 use crate::lohi::LoHiMut;
 
 pub const EXTENT_ENTRIES_IN_INODE: usize = 5;
-const ROOT_USER_ID: u32 = 0;
-const ROOT_GROUP_ID: u32 = 0;
 
 // i_flags
 const INODE_USES_EXTENTS: u32 = 0x00080000;
@@ -123,12 +121,15 @@ impl InodeInner {
         self.i_atime = dentry.access_time_as_unix();
         self.i_mtime = dentry.modify_time_as_unix();
         self.i_ctime = self.i_mtime + 1; // mimic behavior of the Linux FAT driver
-        self.i_links_count = 1; // TODO hardlinks?
+        self.i_links_count = 1;
         self.i_flags = INODE_USES_EXTENTS;
         self.init_extent_header();
     }
 
     fn init_lost_found(&mut self) {
+        const ROOT_USER_ID: u32 = 0;
+        const ROOT_GROUP_ID: u32 = 0;
+
         let now = Utc::now().timestamp() as u32;
         LoHiMut::new(&mut self.i_uid, &mut self.l_i_uid_high).set(ROOT_USER_ID);
         LoHiMut::new(&mut self.i_gid, &mut self.l_i_gid_high).set(ROOT_GROUP_ID);

@@ -151,10 +151,6 @@ impl<'a> FatPartition<'a> {
         ranges
     }
 
-    fn is_free(&self, fat_idx: FatTableIndex) -> bool {
-        self.fat_table()[fat_idx].is_free()
-    }
-
     /// Returns the occupied clusters in the partition
     pub fn used_ranges(&self) -> Ranges<ClusterIdx> {
         let mut ranges = Ranges::new();
