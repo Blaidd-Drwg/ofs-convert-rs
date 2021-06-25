@@ -54,13 +54,26 @@ impl<'a> Ext4Partition<'a> {
         self.block_groups[0].gdt.as_deref_mut().unwrap()
     }
 
-    pub fn set_extents(&mut self, inode: &mut Inode, extents: Vec<Range<ClusterIdx>>, allocator: &Allocator<'_>) {
-        let mut logical_start = 0;
-        for extent in extents {
-            let ext_extent = Extent::new(extent, logical_start);
-            self.register_extent(inode, ext_extent, allocator);
-            logical_start += ext_extent.len as u32;
+    /// Assumes that `inode` currently has no extents.
+    pub fn set_extents(&mut self, inode: &mut Inode, ranges: Vec<Range<ClusterIdx>>, allocator: &Allocator<'_>) {
+        for extent in Self::ranges_to_extents(&ranges) {
+            self.register_extent(inode, extent, allocator);
         }
+    }
+
+    pub fn ranges_to_extents(ranges: &[Range<ClusterIdx>]) -> Vec<Extent> {
+        let mut logical_start = 0;
+        let mut extents = Vec::new();
+        for mut range in ranges.iter().cloned() {
+            while !range.is_empty() {
+                let range_len = range.len().min(Extent::max_len());
+                let range_first_part = range.start..range.start + range_len as ClusterIdx;
+                extents.push(Extent::new(range_first_part, logical_start));
+                logical_start += range_len as u32;
+                range.start += range_len as u32;
+            }
+        }
+        extents
     }
 
     pub fn register_extent(&mut self, inode: &mut Inode, extent: Extent, allocator: &Allocator) {

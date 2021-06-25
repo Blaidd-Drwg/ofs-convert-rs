@@ -74,6 +74,10 @@ impl Extent {
     pub fn as_range(&self) -> Range<ClusterIdx> {
         self.start() as ClusterIdx..self.end() as ClusterIdx
     }
+
+    pub const fn max_len() -> usize {
+        u16::MAX as usize
+    }
 }
 
 impl ExtentIdx {
