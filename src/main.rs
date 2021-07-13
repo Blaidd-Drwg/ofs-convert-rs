@@ -19,7 +19,7 @@ use static_assertions::const_assert;
 use crate::ext4::SuperBlock;
 use crate::fat::FatPartition;
 use crate::partition::Partition;
-use crate::serialization::FatTreeSerializer;
+use crate::serialization::{AbstractDeserializer, FatTreeSerializer};
 
 const_assert!(size_of::<usize>() >= size_of::<u32>());
 

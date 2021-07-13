@@ -1,65 +1,109 @@
+use std::any::Any;
 use std::ops::Range;
 use std::rc::Rc;
 
 use crate::allocator::{AllocatedClusterIdx, Allocator};
 use crate::ext4::{Ext4Dentry, Ext4DentrySized, Ext4Partition, Extent, Inode};
 use crate::fat::{ClusterIdx, FatDentry};
-use crate::serialization::{FileType, Reader};
+use crate::serialization::{DryRunDeserializer, FileType, Reader};
 
-pub struct ExtTreeDeserializer<'a> {
-    reader: Reader<'a>,
-    allocator: Rc<Allocator<'a>>,
-}
 
-impl<'a> ExtTreeDeserializer<'a> {
-    pub fn new(reader: Reader<'a>, allocator: Allocator<'a>) -> Self {
-        Self { reader, allocator: Rc::new(allocator) }
-    }
+pub trait DirectoryWriter {}
 
-    pub fn deserialize_directory_tree(&mut self, partition: &mut Ext4Partition<'a>) {
-        let mut root_dentry_writer = self.build_root(partition);
+
+pub trait AbstractDeserializer<'a, D: DirectoryWriter> {
+    fn build_root(&self, partition: &mut Ext4Partition<'a>) -> D;
+
+    fn deserialize_directory(
+        &mut self,
+        dentry: FatDentry,
+        name: String,
+        parent_directory_writer: &mut D,
+        partition: &mut Ext4Partition<'a>,
+    ) -> D;
+
+    fn deserialize_regular_file(
+        &mut self,
+        dentry: FatDentry,
+        name: String,
+        extents: Vec<Range<ClusterIdx>>,
+        parent_directory_writer: &mut D,
+        partition: &mut Ext4Partition<'a>,
+    );
+
+    fn read_next<T: Any>(&mut self) -> Vec<T>;
+
+    fn deserialize_directory_tree(&mut self, partition: &mut Ext4Partition<'a>) {
+        let mut root_directory_writer = self.build_root(partition);
 
         for _ in 0..self.read_root_child_count() {
-            self.deserialize_file(&mut root_dentry_writer, partition);
+            self.deserialize_file(&mut root_directory_writer, partition);
         }
     }
 
-    fn deserialize_file(&mut self, parent_dentry_writer: &mut DentryWriter, partition: &mut Ext4Partition<'a>) {
-        let file_type = self.reader.next::<FileType>()[0];
-        let dentry = self.reader.next::<FatDentry>()[0];
-        let name = String::from_utf8(self.reader.next::<u8>()).unwrap();
-
-        let mut inode = partition.allocate_inode(dentry.is_dir());
-        inode.init_from_dentry(dentry);
-        parent_dentry_writer.add_dentry(Ext4Dentry::new(inode.inode_no, name), partition);
+    fn deserialize_file(&mut self, parent_directory_writer: &mut D, partition: &mut Ext4Partition<'a>) {
+        let file_type = self.read_next::<FileType>()[0];
+        let dentry = self.read_next::<FatDentry>()[0];
+        let name = String::from_utf8(self.read_next::<u8>()).unwrap();
 
         match file_type {
             FileType::Directory(child_count) => {
-                self.deserialize_directory(inode, parent_dentry_writer, child_count, partition);
+                let mut directory_writer = self.deserialize_directory(dentry, name, parent_directory_writer, partition);
+                for _ in 0..child_count {
+                    self.deserialize_file(&mut directory_writer, partition);
+                }
             }
-            FileType::RegularFile => self.deserialize_regular_file(inode, dentry.file_size as u64, partition),
+            FileType::RegularFile => {
+                let extents = self.read_next::<Range<ClusterIdx>>();
+                self.deserialize_regular_file(dentry, name, extents, parent_directory_writer, partition);
+            }
         }
+    }
+
+    fn read_root_child_count(&mut self) -> u32 {
+        if let FileType::Directory(child_count) = self.read_next::<FileType>()[0] {
+            child_count
+        } else {
+            panic!("First StreamArchiver entry is not root directory child count");
+        }
+    }
+}
+
+
+pub struct Ext4TreeDeserializer<'a> {
+    allocator: Rc<Allocator<'a>>,
+    reader: Reader<'a>,
+}
+
+impl<'a> AbstractDeserializer<'a, DentryWriter<'a>> for Ext4TreeDeserializer<'a> {
+    fn read_next<T: Any>(&mut self) -> Vec<T> {
+        self.reader.next::<T>()
     }
 
     fn deserialize_directory(
         &mut self,
-        inode: Inode<'a>,
-        parent_dentry_writer: &mut DentryWriter,
-        child_count: u32,
+        dentry: FatDentry,
+        name: String,
+        parent_directory_writer: &mut DentryWriter<'a>,
         partition: &mut Ext4Partition<'a>,
-    ) {
+    ) -> DentryWriter<'a> {
+        let inode = self.build_file(dentry, name, parent_directory_writer, partition);
         let mut dentry_writer = DentryWriter::new(inode, Rc::clone(&self.allocator), partition);
-        Self::build_dot_dirs(&mut parent_dentry_writer.inode, &mut dentry_writer, partition);
-
-        for _ in 0..child_count {
-            self.deserialize_file(&mut dentry_writer, partition);
-        }
+        Self::build_dot_dirs(&mut parent_directory_writer.inode, &mut dentry_writer, partition);
+        dentry_writer
     }
 
-    fn deserialize_regular_file(&mut self, mut inode: Inode<'a>, size: u64, partition: &mut Ext4Partition) {
-        let extents = self.reader.next::<Range<ClusterIdx>>();
+    fn deserialize_regular_file(
+        &mut self,
+        dentry: FatDentry,
+        name: String,
+        extents: Vec<Range<ClusterIdx>>,
+        parent_directory_writer: &mut DentryWriter,
+        partition: &mut Ext4Partition<'a>,
+    ) {
+        let mut inode = self.build_file(dentry, name, parent_directory_writer, partition);
         partition.set_extents(&mut inode, extents, &self.allocator);
-        inode.set_size(size);
+        inode.set_size(dentry.file_size as u64);
     }
 
     fn build_root(&self, partition: &mut Ext4Partition<'a>) -> DentryWriter<'a> {
@@ -68,6 +112,25 @@ impl<'a> ExtTreeDeserializer<'a> {
         Self::build_root_dot_dirs(&mut dentry_writer, partition);
         self.build_lost_found(&mut dentry_writer, partition);
         dentry_writer
+    }
+}
+
+impl<'a> Ext4TreeDeserializer<'a> {
+    pub fn new(reader: Reader<'a>, allocator: Allocator<'a>) -> Self {
+        Self { reader, allocator: Rc::new(allocator) }
+    }
+
+    fn build_file(
+        &mut self,
+        dentry: FatDentry,
+        name: String,
+        parent_dentry_writer: &mut DentryWriter,
+        partition: &mut Ext4Partition<'a>,
+    ) -> Inode<'a> {
+        let mut inode = partition.allocate_inode(dentry.is_dir());
+        inode.init_from_dentry(dentry);
+        parent_dentry_writer.add_dentry(Ext4Dentry::new(inode.inode_no, name), partition);
+        inode
     }
 
     fn build_lost_found(&self, root_dentry_writer: &mut DentryWriter, partition: &mut Ext4Partition) {
@@ -99,17 +162,9 @@ impl<'a> ExtTreeDeserializer<'a> {
         dentry_writer.add_dentry(dot_dot_dentry, partition);
         dentry_writer.inode.increment_link_count();
     }
-
-    fn read_root_child_count(&mut self) -> u32 {
-        if let FileType::Directory(child_count) = self.reader.next::<FileType>()[0] {
-            child_count
-        } else {
-            panic!("First StreamArchiver entry is not root directory child count");
-        }
-    }
 }
 
-struct DentryWriter<'a> {
+pub struct DentryWriter<'a> {
     inode: Inode<'a>,
     block_size: usize,
     position_in_block: usize,
@@ -184,6 +239,8 @@ impl<'a> DentryWriter<'a> {
         self.inode.increment_size(self.block_size as u64);
     }
 }
+
+impl DirectoryWriter for DentryWriter<'_> {}
 
 impl Drop for DentryWriter<'_> {
     fn drop(&mut self) {

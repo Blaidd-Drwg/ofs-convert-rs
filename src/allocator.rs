@@ -3,7 +3,6 @@ use std::marker::PhantomData;
 use std::ops::Range;
 use std::{io, slice};
 
-
 use crate::fat::ClusterIdx;
 use crate::ranges::{NotCoveredRange, Ranges};
 
