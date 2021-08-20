@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::convert::{TryFrom, TryInto};
 use std::ops::Range;
 use std::rc::Rc;
@@ -13,9 +14,12 @@ use crate::serialization::{Ext4TreeDeserializer, FileType, StreamArchiver};
 type Timestamp = u32;
 
 pub struct FatTreeSerializer<'a> {
+    partition: &'a FatPartition<'a>,
     allocator: Rc<Allocator<'a>>, /* Rc to be shared with `self.stream_archiver` and nobody else, otherwise
                                    * `into_deserializer` will panic */
-    stream_archiver: StreamArchiver<'a>,
+    stream_archiver: RefCell<StreamArchiver<'a>>, /* `serialize_directory` borrows `self.partition` twice, so it has
+                                                   * to borrow `self` immutably. However, it also needs to mutate
+                                                   * `self.stream_archiver`, so we wrap it in a RefCell. */
     forbidden_ranges: Ranges<ClusterIdx>, /* ranges that cannot contain any data as they will be overwritten with
                                            * ext4 metadata */
 }
@@ -59,68 +63,77 @@ pub fn fat_time_to_unix_time(date: u16, time: Option<u16>) -> u32 {
 }
 
 impl<'a> FatTreeSerializer<'a> {
-    pub fn new(allocator: Allocator<'a>, cluster_size: usize, forbidden_ranges: Ranges<ClusterIdx>) -> Self {
+    pub fn new(allocator: Allocator<'a>, partition: &'a FatPartition<'a>, forbidden_ranges: Ranges<ClusterIdx>) -> Self {
         let allocator = Rc::new(allocator);
-        let stream_archiver = StreamArchiver::new(allocator.clone(), cluster_size);
-        Self { allocator, stream_archiver, forbidden_ranges }
+        let stream_archiver = StreamArchiver::new(allocator.clone(), partition.cluster_size() as usize);
+        Self {
+            allocator,
+            partition,
+            stream_archiver: RefCell::new(stream_archiver),
+            forbidden_ranges,
+        }
     }
 
-    pub fn serialize_directory_tree(&mut self, partition: &FatPartition) {
+    pub fn serialize_directory_tree(&mut self) {
         // SAFETY: safe because `ROOT_FAT_IDX` belongs to the root directory
-        let root_child_count = unsafe { partition.dir_content_iter(ROOT_FAT_IDX).count() };
+        let root_child_count = unsafe { self.partition.dir_content_iter(ROOT_FAT_IDX).count() };
         self.archive_root_child_count(root_child_count.try_into().unwrap());
 
         // SAFETY: safe because `ROOT_FAT_IDX` belongs to the root directory
-        for file in unsafe { partition.dir_content_iter(ROOT_FAT_IDX) } {
+        for mut file in unsafe { self.partition.dir_content_iter(ROOT_FAT_IDX) } {
             if file.dentry.is_dir() {
-                self.serialize_directory(file, partition);
+                self.serialize_directory(file);
             } else {
-                self.archive_file(file, partition);
+                self.copy_data_to_unforbidden(&mut file);
+                self.archive_file(file);
             }
         }
     }
 
-    fn serialize_directory(&mut self, file: FatFile, partition: &FatPartition) {
+    fn serialize_directory(&self, file: FatFile) {
         assert!(file.dentry.is_dir());
         let first_fat_idx = file.dentry.first_fat_index();
         // SAFETY: safe because `first_fat_index` belongs to a directory
-        let child_count = unsafe { partition.dir_content_iter(first_fat_idx).count() };
+        let child_count = unsafe { self.partition.dir_content_iter(first_fat_idx).count() };
         self.archive_directory(file, child_count.try_into().unwrap());
 
         // SAFETY: safe because `first_fat_index` belongs to a directory
-        for file in unsafe { partition.dir_content_iter(first_fat_idx) } {
+        for mut file in unsafe { self.partition.dir_content_iter(first_fat_idx) } {
             if file.dentry.is_dir() {
-                self.serialize_directory(file, partition);
+                self.serialize_directory(file);
             } else {
-                self.archive_file(file, partition);
+                self.copy_data_to_unforbidden(&mut file);
+                self.archive_file(file);
             }
         }
     }
 
-    pub fn archive_root_child_count(&mut self, root_child_count: u32) {
-        self.stream_archiver.archive(vec![FileType::Directory(root_child_count)]);
+    fn archive_root_child_count(&self, root_child_count: u32) {
+        let mut archiver = self.stream_archiver.borrow_mut();
+        archiver.archive(vec![FileType::Directory(root_child_count)]);
     }
 
-    pub fn archive_file(&mut self, mut file: FatFile, partition: &FatPartition) {
-        self.copy_data_to_unforbidden(&mut file, partition);
-        self.stream_archiver.archive(vec![FileType::RegularFile]);
-        self.stream_archiver.archive(vec![file.dentry]);
-        self.stream_archiver.archive(file.name.into_bytes());
-        self.stream_archiver.archive(file.data_ranges);
+    fn archive_file(&self, file: FatFile) {
+        let mut archiver = self.stream_archiver.borrow_mut();
+        archiver.archive(vec![FileType::RegularFile]);
+        archiver.archive(vec![file.dentry]);
+        archiver.archive(file.name.into_bytes());
+        archiver.archive(file.data_ranges);
     }
 
-    pub fn archive_directory(&mut self, file: FatFile, child_count: u32) {
-        self.stream_archiver.archive(vec![FileType::Directory(child_count)]);
-        self.stream_archiver.archive(vec![file.dentry]);
-        self.stream_archiver.archive(file.name.into_bytes());
+    fn archive_directory(&self, file: FatFile, child_count: u32) {
+        let mut archiver = self.stream_archiver.borrow_mut();
+        archiver.archive(vec![FileType::Directory(child_count)]);
+        archiver.archive(vec![file.dentry]);
+        archiver.archive(file.name.into_bytes());
     }
 
-    fn copy_data_to_unforbidden(&self, file: &mut FatFile, partition: &FatPartition) {
+    fn copy_data_to_unforbidden(&self, file: &mut FatFile) {
         let old_ranges = std::mem::take(&mut file.data_ranges);
         for range in old_ranges {
             for (range_fragment, forbidden) in self.forbidden_ranges.split_overlapping(range) {
                 if forbidden {
-                    let mut copied_ranges = self.copy_range_to_unforbidden(range_fragment, partition);
+                    let mut copied_ranges = self.copy_range_to_unforbidden(range_fragment);
                     file.data_ranges.append(&mut copied_ranges);
                 } else {
                     file.data_ranges.push(range_fragment);
@@ -129,18 +142,14 @@ impl<'a> FatTreeSerializer<'a> {
         }
     }
 
-    fn copy_range_to_unforbidden(
-        &self,
-        mut range: Range<ClusterIdx>,
-        partition: &FatPartition,
-    ) -> Vec<Range<ClusterIdx>> {
+    fn copy_range_to_unforbidden(&self, mut range: Range<ClusterIdx>) -> Vec<Range<ClusterIdx>> {
         let mut copied_fragments = Vec::new();
         while !range.is_empty() {
             let mut allocated = self.allocator.allocate(range.len());
             let allocated_len = allocated.len();
             for (old_cluster_idx, mut new_cluster_idx) in range.clone().zip(allocated.iter_mut()) {
-                let old_data_cluster_idx = partition.cluster_idx_to_data_cluster_idx(old_cluster_idx).unwrap();
-                let old_cluster = partition.data_cluster(old_data_cluster_idx);
+                let old_data_cluster_idx = self.partition.cluster_idx_to_data_cluster_idx(old_cluster_idx).unwrap();
+                let old_cluster = self.partition.data_cluster(old_data_cluster_idx);
                 self.allocator.cluster_mut(&mut new_cluster_idx).copy_from_slice(old_cluster);
             }
             range.start += allocated_len as u32;

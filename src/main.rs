@@ -51,14 +51,13 @@ unsafe fn ofs_convert(partition_path: &str) -> io::Result<()> {
     let (fat_partition, mut allocator) =
         FatPartition::new_with_allocator(partition.as_mut_ptr(), partition.len(), partition.lifetime);
     let boot_sector = fat_partition.boot_sector();
-    let superblock = SuperBlock::from(boot_sector)?;
-    let forbidden_ranges = superblock.block_group_overhead_ranges();
+    let forbidden_ranges = SuperBlock::from(boot_sector)?.block_group_overhead_ranges();
     for range in &forbidden_ranges {
         allocator.forbid(range.clone());
     }
 
-    let mut serializer = FatTreeSerializer::new(allocator, fat_partition.cluster_size() as usize, forbidden_ranges);
-    serializer.serialize_directory_tree(&fat_partition);
+    let mut serializer = FatTreeSerializer::new(allocator, &fat_partition, forbidden_ranges);
+    serializer.serialize_directory_tree();
 
     // This step makes the FAT partition inconsistent
     let mut ext4_partition = fat_partition.into_ext4();
