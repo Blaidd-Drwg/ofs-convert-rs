@@ -5,7 +5,7 @@ use std::rc::Rc;
 use crate::allocator::{AllocatedClusterIdx, Allocator};
 use crate::ext4::{Ext4Dentry, Ext4DentrySized, Ext4Partition, Extent, Inode};
 use crate::fat::{ClusterIdx, FatDentry};
-use crate::serialization::{DryRunDeserializer, FileType, Reader};
+use crate::serialization::{FileType, Reader};
 
 
 pub trait DirectoryWriter {}

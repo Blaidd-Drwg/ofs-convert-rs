@@ -59,9 +59,9 @@ unsafe fn ofs_convert(partition_path: &str) -> io::Result<()> {
     let mut serializer = FatTreeSerializer::new(allocator, &fat_partition, forbidden_ranges);
     serializer.serialize_directory_tree();
 
+    let mut deserializer = serializer.into_deserializer();
     // This step makes the FAT partition inconsistent
     let mut ext4_partition = fat_partition.into_ext4();
-    let mut deserializer = serializer.into_deserializer();
     deserializer.deserialize_directory_tree(&mut ext4_partition);
 
     Ok(())
