@@ -8,13 +8,13 @@ use chrono::prelude::*;
 use crate::allocator::Allocator;
 use crate::fat::{ClusterIdx, FatDentry, FatFile, FatPartition, ROOT_FAT_IDX};
 use crate::ranges::Ranges;
-use crate::serialization::{Ext4TreeDeserializer, FileType, StreamArchiver};
+use crate::serialization::{Deserializer, Ext4TreeDeserializerInternals, FileType, StreamArchiver};
 
 
 type Timestamp = u32;
 
-pub struct FatTreeSerializer<'a, 'b> {
-    partition: &'b FatPartition<'a>,
+pub struct FatTreeSerializer<'a> {
+    partition: FatPartition<'a>,
     allocator: Rc<Allocator<'a>>, /* Rc to be shared with `self.stream_archiver` and nobody else, otherwise
                                    * `into_deserializer` will panic */
     stream_archiver: RefCell<StreamArchiver<'a>>, /* `serialize_directory` borrows `self.partition` twice, so it has
@@ -62,8 +62,8 @@ pub fn fat_time_to_unix_time(date: u16, time: Option<u16>) -> u32 {
     u32::try_from(datetime.timestamp()).expect("Timestamp after year 2038 does not fit into 32 bits")
 }
 
-impl<'a, 'b> FatTreeSerializer<'a, 'b> {
-    pub fn new(allocator: Allocator<'a>, partition: &'b FatPartition<'a>, forbidden_ranges: Ranges<ClusterIdx>) -> Self {
+impl<'a> FatTreeSerializer<'a> {
+    pub fn new(allocator: Allocator<'a>, partition: FatPartition<'a>, forbidden_ranges: Ranges<ClusterIdx>) -> Self {
         let allocator = Rc::new(allocator);
         let stream_archiver = StreamArchiver::new(allocator.clone(), partition.cluster_size() as usize);
         Self {
@@ -158,9 +158,13 @@ impl<'a, 'b> FatTreeSerializer<'a, 'b> {
         copied_fragments
     }
 
-    pub fn into_deserializer(self) -> Ext4TreeDeserializer<'a> {
+    pub fn into_deserializer(self) -> Deserializer<'a, Ext4TreeDeserializerInternals<'a>> {
         std::mem::drop(self.allocator); // drop the Rc, allowing `self.stream_archiver` to unwrap it
         let (reader, allocator) = self.stream_archiver.into_inner().into_reader();
-        Ext4TreeDeserializer::new(reader, allocator)
+        Deserializer::new(Ext4TreeDeserializerInternals::new(
+            reader,
+            allocator,
+            self.partition,
+        ))
     }
 }

@@ -4,80 +4,27 @@ use std::rc::Rc;
 
 use crate::allocator::{AllocatedClusterIdx, Allocator};
 use crate::ext4::{Ext4Dentry, Ext4DentrySized, Ext4Partition, Extent, Inode};
-use crate::fat::{ClusterIdx, FatDentry};
-use crate::serialization::{FileType, Reader};
+use crate::fat::{ClusterIdx, FatDentry, FatPartition};
+use crate::serialization::{Reader, DeserializerInternals, DirectoryWriter};
 
 
-pub trait DirectoryWriter {}
-
-
-pub trait AbstractDeserializer<'a, D: DirectoryWriter> {
-    fn build_root(&self, partition: &mut Ext4Partition<'a>) -> D;
-
-    fn deserialize_directory(
-        &mut self,
-        dentry: FatDentry,
-        name: String,
-        parent_directory_writer: &mut D,
-        partition: &mut Ext4Partition<'a>,
-    ) -> D;
-
-    fn deserialize_regular_file(
-        &mut self,
-        dentry: FatDentry,
-        name: String,
-        extents: Vec<Range<ClusterIdx>>,
-        parent_directory_writer: &mut D,
-        partition: &mut Ext4Partition<'a>,
-    );
-
-    fn read_next<T: Any>(&mut self) -> Vec<T>;
-
-    fn deserialize_directory_tree(&mut self, partition: &mut Ext4Partition<'a>) {
-        let mut root_directory_writer = self.build_root(partition);
-
-        for _ in 0..self.read_root_child_count() {
-            self.deserialize_file(&mut root_directory_writer, partition);
-        }
-    }
-
-    fn deserialize_file(&mut self, parent_directory_writer: &mut D, partition: &mut Ext4Partition<'a>) {
-        let file_type = self.read_next::<FileType>()[0];
-        let dentry = self.read_next::<FatDentry>()[0];
-        let name = String::from_utf8(self.read_next::<u8>()).unwrap();
-
-        match file_type {
-            FileType::Directory(child_count) => {
-                let mut directory_writer = self.deserialize_directory(dentry, name, parent_directory_writer, partition);
-                for _ in 0..child_count {
-                    self.deserialize_file(&mut directory_writer, partition);
-                }
-            }
-            FileType::RegularFile => {
-                let extents = self.read_next::<Range<ClusterIdx>>();
-                self.deserialize_regular_file(dentry, name, extents, parent_directory_writer, partition);
-            }
-        }
-    }
-
-    fn read_root_child_count(&mut self) -> u32 {
-        if let FileType::Directory(child_count) = self.read_next::<FileType>()[0] {
-            child_count
-        } else {
-            panic!("First StreamArchiver entry is not root directory child count");
-        }
-    }
-}
-
-
-pub struct Ext4TreeDeserializer<'a> {
+pub struct Ext4TreeDeserializerInternals<'a> {
     allocator: Rc<Allocator<'a>>,
     reader: Reader<'a>,
+    fat_partition: Option<FatPartition<'a>>,
+    ext_partition: Option<Ext4Partition<'a>>,
 }
 
-impl<'a> AbstractDeserializer<'a, DentryWriter<'a>> for Ext4TreeDeserializer<'a> {
-    fn read_next<T: Any>(&mut self) -> Vec<T> {
-        self.reader.next::<T>()
+impl<'a> DeserializerInternals<'a> for Ext4TreeDeserializerInternals<'a> {
+    type D = DentryWriter<'a>;
+
+    fn build_root(&mut self) -> DentryWriter<'a> {
+        self.ext_partition = Some(self.fat_partition.take().unwrap().into_ext4());
+        let root_inode = unsafe { self.partition().build_root_inode() };
+        let mut dentry_writer = DentryWriter::new(root_inode, Rc::clone(&self.allocator), self.partition());
+        self.build_root_dot_dirs(&mut dentry_writer);
+        self.build_lost_found(&mut dentry_writer);
+        dentry_writer
     }
 
     fn deserialize_directory(
@@ -85,11 +32,10 @@ impl<'a> AbstractDeserializer<'a, DentryWriter<'a>> for Ext4TreeDeserializer<'a>
         dentry: FatDentry,
         name: String,
         parent_directory_writer: &mut DentryWriter<'a>,
-        partition: &mut Ext4Partition<'a>,
     ) -> DentryWriter<'a> {
-        let inode = self.build_file(dentry, name, parent_directory_writer, partition);
-        let mut dentry_writer = DentryWriter::new(inode, Rc::clone(&self.allocator), partition);
-        Self::build_dot_dirs(&mut parent_directory_writer.inode, &mut dentry_writer, partition);
+        let inode = self.build_file(dentry, name, parent_directory_writer);
+        let mut dentry_writer = DentryWriter::new(inode, Rc::clone(&self.allocator), self.partition());
+        self.build_dot_dirs(&mut parent_directory_writer.inode, &mut dentry_writer);
         dentry_writer
     }
 
@@ -99,70 +45,72 @@ impl<'a> AbstractDeserializer<'a, DentryWriter<'a>> for Ext4TreeDeserializer<'a>
         name: String,
         extents: Vec<Range<ClusterIdx>>,
         parent_directory_writer: &mut DentryWriter,
-        partition: &mut Ext4Partition<'a>,
     ) {
-        let mut inode = self.build_file(dentry, name, parent_directory_writer, partition);
-        partition.set_extents(&mut inode, extents, &self.allocator);
+        let mut inode = self.build_file(dentry, name, parent_directory_writer);
+        self.ext_partition
+            .as_mut()
+            .unwrap()
+            .set_extents(&mut inode, extents, &self.allocator);
         inode.set_size(dentry.file_size as u64);
     }
 
-    fn build_root(&self, partition: &mut Ext4Partition<'a>) -> DentryWriter<'a> {
-        let root_inode = unsafe { partition.build_root_inode() };
-        let mut dentry_writer = DentryWriter::new(root_inode, Rc::clone(&self.allocator), partition);
-        Self::build_root_dot_dirs(&mut dentry_writer, partition);
-        self.build_lost_found(&mut dentry_writer, partition);
-        dentry_writer
+    fn read_next<T: Any>(&mut self) -> Vec<T> {
+        self.reader.next::<T>()
     }
 }
 
-impl<'a> Ext4TreeDeserializer<'a> {
-    pub fn new(reader: Reader<'a>, allocator: Allocator<'a>) -> Self {
-        Self { reader, allocator: Rc::new(allocator) }
+impl<'a> Ext4TreeDeserializerInternals<'a> {
+    pub fn new(reader: Reader<'a>, allocator: Allocator<'a>, partition: FatPartition<'a>) -> Self {
+        Self {
+            reader,
+            allocator: Rc::new(allocator),
+            ext_partition: None,
+            fat_partition: Some(partition),
+        }
     }
 
-    fn build_file(
-        &mut self,
-        dentry: FatDentry,
-        name: String,
-        parent_dentry_writer: &mut DentryWriter,
-        partition: &mut Ext4Partition<'a>,
-    ) -> Inode<'a> {
-        let mut inode = partition.allocate_inode(dentry.is_dir());
+    fn partition(&mut self) -> &mut Ext4Partition<'a> {
+        self.ext_partition.as_mut().unwrap()
+    }
+
+    fn build_file(&mut self, dentry: FatDentry, name: String, parent_dentry_writer: &mut DentryWriter) -> Inode<'a> {
+        let mut inode = self.partition().allocate_inode(dentry.is_dir());
         inode.init_from_dentry(dentry);
-        parent_dentry_writer.add_dentry(Ext4Dentry::new(inode.inode_no, name), partition);
+        parent_dentry_writer.add_dentry(Ext4Dentry::new(inode.inode_no, name), self.partition());
         inode
     }
 
-    fn build_lost_found(&self, root_dentry_writer: &mut DentryWriter, partition: &mut Ext4Partition) {
-        let inode = partition.build_lost_found_inode();
+    fn build_lost_found(&mut self, root_dentry_writer: &mut DentryWriter) {
+        let inode = self.partition().build_lost_found_inode();
         let dentry = Ext4Dentry::new(inode.inode_no, "lost+found".to_string());
 
-        root_dentry_writer.add_dentry(dentry, partition);
-        let mut dentry_writer = DentryWriter::new(inode, Rc::clone(&self.allocator), partition);
-        Self::build_dot_dirs(&mut root_dentry_writer.inode, &mut dentry_writer, partition);
+        root_dentry_writer.add_dentry(dentry, self.partition());
+        let mut dentry_writer = DentryWriter::new(inode, Rc::clone(&self.allocator), self.partition());
+        self.build_dot_dirs(&mut root_dentry_writer.inode, &mut dentry_writer);
     }
 
-    fn build_dot_dirs(parent_inode: &mut Inode, dentry_writer: &mut DentryWriter, partition: &mut Ext4Partition) {
+    fn build_dot_dirs(&mut self, parent_inode: &mut Inode, dentry_writer: &mut DentryWriter) {
         let dot_dentry = Ext4Dentry::new(dentry_writer.inode.inode_no, ".".to_string());
-        dentry_writer.add_dentry(dot_dentry, partition);
+        dentry_writer.add_dentry(dot_dentry, self.partition());
         dentry_writer.inode.increment_link_count();
 
         let dot_dot_dentry = Ext4Dentry::new(parent_inode.inode_no, "..".to_string());
-        dentry_writer.add_dentry(dot_dot_dentry, partition);
+        dentry_writer.add_dentry(dot_dot_dentry, self.partition());
         parent_inode.increment_link_count();
     }
 
     // same as `build_dot_dirs` except `parent_inode` would alias `dentry_writer.inode`
-    fn build_root_dot_dirs(dentry_writer: &mut DentryWriter, partition: &mut Ext4Partition) {
+    fn build_root_dot_dirs(&mut self, dentry_writer: &mut DentryWriter) {
         let dot_dentry = Ext4Dentry::new(dentry_writer.inode.inode_no, ".".to_string());
-        dentry_writer.add_dentry(dot_dentry, partition);
+        dentry_writer.add_dentry(dot_dentry, self.partition());
         dentry_writer.inode.increment_link_count();
 
         let dot_dot_dentry = Ext4Dentry::new(dentry_writer.inode.inode_no, "..".to_string());
-        dentry_writer.add_dentry(dot_dot_dentry, partition);
+        dentry_writer.add_dentry(dot_dot_dentry, self.partition());
         dentry_writer.inode.increment_link_count();
     }
 }
+
 
 pub struct DentryWriter<'a> {
     inode: Inode<'a>,

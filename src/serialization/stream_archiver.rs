@@ -149,12 +149,13 @@ impl<'a> StreamArchiver<'a> {
 }
 
 
+#[derive(Clone)]
 pub struct Reader<'a> {
     current_page: &'a Page,
     page_size: usize,
     position_in_current_page: usize,
     current_header: Header,
-    allocator: AllocatedReader<'a>,
+    allocator: Rc<AllocatedReader<'a>>,
 }
 
 impl<'a> Reader<'a> {
@@ -165,7 +166,7 @@ impl<'a> Reader<'a> {
             page_size,
             position_in_current_page: size_of::<PageIdx>(),
             current_header: Header { len: 0, type_id: TypeId::of::<()>() },
-            allocator: allocated_reader,
+            allocator: Rc::new(allocated_reader),
         }
     }
 

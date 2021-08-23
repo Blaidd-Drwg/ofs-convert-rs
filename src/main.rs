@@ -19,7 +19,7 @@ use static_assertions::const_assert;
 use crate::ext4::SuperBlock;
 use crate::fat::FatPartition;
 use crate::partition::Partition;
-use crate::serialization::{AbstractDeserializer, FatTreeSerializer};
+use crate::serialization::FatTreeSerializer;
 
 const_assert!(size_of::<usize>() >= size_of::<u32>());
 
@@ -56,13 +56,12 @@ unsafe fn ofs_convert(partition_path: &str) -> io::Result<()> {
         allocator.forbid(range.clone());
     }
 
-    let mut serializer = FatTreeSerializer::new(allocator, &fat_partition, forbidden_ranges);
+    let mut serializer = FatTreeSerializer::new(allocator, fat_partition, forbidden_ranges);
     serializer.serialize_directory_tree();
 
     let mut deserializer = serializer.into_deserializer();
     // This step makes the FAT partition inconsistent
-    let mut ext4_partition = fat_partition.into_ext4();
-    deserializer.deserialize_directory_tree(&mut ext4_partition);
+    deserializer.deserialize_directory_tree();
 
     Ok(())
 }
