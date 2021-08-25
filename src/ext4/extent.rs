@@ -2,6 +2,7 @@ use std::mem::size_of;
 use std::ops::Range;
 use std::slice;
 
+use num::Integer;
 use static_assertions::const_assert_eq;
 
 use crate::allocator::{AllocatedClusterIdx, Allocator};
@@ -156,6 +157,25 @@ impl<'a> ExtentTree<'a> {
         Self { root: root_level, allocator }
     }
 
+    pub fn required_block_count(extent_count: usize, block_size: usize) -> usize {
+        if extent_count == 0 {
+            return 0;
+        }
+
+        let extents_per_block = block_size / size_of::<ExtentTreeElement>();
+        let level_count = 1
+            + (extent_count as f64 / (EXTENT_ENTRIES_IN_INODE - 1) as f64)
+                .log(extents_per_block as f64)
+                .ceil() as u32;
+
+        let mut result = 0;
+        for level in 1..level_count {
+            let blocks_in_level = extent_count.div_ceil(&extents_per_block.pow(level));
+            result += blocks_in_level;
+        }
+        result
+    }
+
     pub fn add_extent(&mut self, extent: Extent) -> Vec<ClusterIdx> {
         match self.root.add_extent(extent, self.allocator) {
             Ok(allocated_blocks) => allocated_blocks,
@@ -228,7 +248,7 @@ impl<'a> ExtentTreeLevel<'a> {
             return Ok(allocated_blocks);
         }
 
-        // all leaves below us are full, try adding a new leaves; if we have no space left for a new leaf, give up
+        // all leaves below us are full, try adding a new leaf; if we have no space left for a new leaf, give up
         self.add_extent_with_new_leaf(extent, allocator)
     }
 

@@ -8,7 +8,7 @@ use chrono::prelude::*;
 use crate::allocator::Allocator;
 use crate::fat::{ClusterIdx, FatDentry, FatFile, FatPartition, ROOT_FAT_IDX};
 use crate::ranges::Ranges;
-use crate::serialization::{Deserializer, Ext4TreeDeserializerInternals, FileType, StreamArchiver};
+use crate::serialization::{Deserializer, Ext4TreeDeserializer, FileType, StreamArchiver};
 
 
 type Timestamp = u32;
@@ -158,13 +158,9 @@ impl<'a> FatTreeSerializer<'a> {
         copied_fragments
     }
 
-    pub fn into_deserializer(self) -> Deserializer<'a, Ext4TreeDeserializerInternals<'a>> {
+    pub fn into_deserializer(self) -> Result<Ext4TreeDeserializer<'a>, ()> {
         std::mem::drop(self.allocator); // drop the Rc, allowing `self.stream_archiver` to unwrap it
         let (reader, allocator) = self.stream_archiver.into_inner().into_reader();
-        Deserializer::new(Ext4TreeDeserializerInternals::new(
-            reader,
-            allocator,
-            self.partition,
-        ))
+        Ext4TreeDeserializer::new_with_dry_run(reader, allocator, self.partition)
     }
 }

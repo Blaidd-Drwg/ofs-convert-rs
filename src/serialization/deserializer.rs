@@ -15,10 +15,6 @@ pub struct Deserializer<'a, I: DeserializerInternals<'a>> {
 }
 
 impl<'a, I: DeserializerInternals<'a>> Deserializer<'a, I> {
-    pub fn new(internals: I) -> Self {
-        Self { internals, _lifetime: PhantomData }
-    }
-
     pub fn deserialize_directory_tree(&mut self) {
         let mut root_directory_writer = self.internals.build_root();
 
