@@ -252,8 +252,7 @@ impl SuperBlock {
     // TODO test
     pub fn free_inode_count(&self) -> usize {
         let reserved_inodes_count = FIRST_NON_RESERVED_INODE - FIRST_EXISTING_INODE;
-        let lost_found_inodes_count = 1;
-        (self.s_inodes_count - reserved_inodes_count - lost_found_inodes_count) as usize
+        (self.s_inodes_count - reserved_inodes_count) as usize
     }
 
     pub fn block_group_overhead(&self, has_superblock: HasSuperBlock) -> u64 {

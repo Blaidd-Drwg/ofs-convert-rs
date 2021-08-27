@@ -37,8 +37,8 @@ impl<'a> DryRunDeserializerInternals<'a> {
             reader,
             free_inodes,
             free_blocks,
-            used_inodes: 0,
-            used_blocks: 0,
+            used_inodes: 1, // lost+found
+            used_blocks: 1, // lost+found
             block_size,
         }
     }
@@ -124,7 +124,7 @@ impl DryRunDirectoryWriter {
             used_dentry_blocks: 0,
             used_extent_blocks: 0,
             block_size,
-            position_in_block: 0,
+            position_in_block: block_size, // to model the first block being allocated immediately
         }
     }
 

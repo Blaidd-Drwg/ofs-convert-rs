@@ -143,6 +143,7 @@ impl<'a> FatTreeSerializer<'a> {
         }
     }
 
+    // TODO handle failure to allocate here
     fn copy_range_to_unforbidden(&self, mut range: Range<ClusterIdx>) -> Vec<Range<ClusterIdx>> {
         let mut copied_fragments = Vec::new();
         while !range.is_empty() {
