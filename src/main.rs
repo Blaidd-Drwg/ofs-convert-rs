@@ -23,6 +23,7 @@ use crate::serialization::FatTreeSerializer;
 
 const_assert!(size_of::<usize>() >= size_of::<u32>());
 
+// TODO assertion fails with mkfs -C -F 32 -s 2 -S 512 150
 fn main() {
     if args().len() != 2 {
         print_help();
