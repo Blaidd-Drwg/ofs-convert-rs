@@ -49,16 +49,16 @@ impl<'a> DryRunDeserializerInternals<'a> {
         match (enough_inodes, enough_blocks) {
             (true, true) => Ok(()),
             (true, false) => self.error(&format!(
-                "{} inodes required but only {} available",
-                self.used_inodes, self.free_inodes
-            )),
-            (false, true) => self.error(&format!(
                 "{} free blocks required but only {} available",
                 self.used_blocks, self.free_blocks
             )),
+            (false, true) => self.error(&format!(
+                "{} inodes required but only {} available",
+                self.used_inodes, self.free_inodes
+            )),
             (false, false) => self.error(&format!(
-                "{} inodes required but only {} available; {} free blocks required but only {} available",
-                self.used_inodes, self.free_inodes, self.used_blocks, self.free_blocks
+                "{} free blocks required but only {} available; {} inodes required but only {} available",
+                self.used_blocks, self.free_blocks, self.used_inodes, self.free_inodes
             )),
         }
     }
