@@ -138,6 +138,25 @@ impl<'a, Idx: Ord + Copy> IntoIterator for &'a Ranges<Idx> {
     }
 }
 
+// TODO test
+impl<'a, Idx: Ord + Copy> Ranges<Idx>
+where Range<Idx>: ExactSizeIterator
+{
+    pub fn free_element_count(&self, start_idx: Idx, end_idx: Idx) -> usize {
+        let mut current_idx = start_idx;
+        let mut count = 0;
+        while current_idx < end_idx {
+            let range = match self.next_not_covered(current_idx) {
+                NotCoveredRange::Bounded(Range { start, end }) => start..end.min(end_idx),
+                NotCoveredRange::Unbounded(start) => start..end_idx,
+            };
+            count += range.len();
+            current_idx = range.end;
+        }
+        count
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

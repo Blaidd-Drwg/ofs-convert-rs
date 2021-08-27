@@ -1,4 +1,6 @@
 use std::any::Any;
+use std::io;
+use std::marker::PhantomData;
 use std::ops::Range;
 
 use crate::ext4::{Ext4Dentry, ExtentTree};
@@ -9,8 +11,13 @@ use crate::serialization::{Deserializer, DeserializerInternals, DirectoryWriter,
 pub type DryRunDeserializer<'a> = Deserializer<'a, DryRunDeserializerInternals<'a>>;
 
 impl<'a> DryRunDeserializer<'a> {
-    pub fn dry_run() -> Result<(), ()> {
-        Ok(())
+    pub fn dry_run(reader: Reader<'a>, free_inodes: usize, free_blocks: usize, block_size: usize) -> io::Result<()> {
+        let mut instance = Self {
+            internals: DryRunDeserializerInternals::new(reader, free_inodes, free_blocks, block_size),
+            _lifetime: PhantomData,
+        };
+        instance.deserialize_directory_tree();
+        instance.internals.result()
     }
 }
 
@@ -25,7 +32,7 @@ pub struct DryRunDeserializerInternals<'a> {
 
 impl<'a> DryRunDeserializerInternals<'a> {
     // TODO pass partition to constructor instead?
-    pub fn new(free_inodes: usize, free_blocks: usize, block_size: usize, reader: Reader<'a>) -> Self {
+    pub fn new(reader: Reader<'a>, free_inodes: usize, free_blocks: usize, block_size: usize) -> Self {
         Self {
             reader,
             free_inodes,
@@ -36,12 +43,28 @@ impl<'a> DryRunDeserializerInternals<'a> {
         }
     }
 
-    fn result(&self) -> Result<(), ()> {
-        if self.used_inodes <= self.free_inodes && self.used_blocks <= self.free_blocks {
-            Ok(())
-        } else {
-            Err(())
+    fn result(&self) -> io::Result<()> {
+        let enough_inodes = self.used_inodes <= self.free_inodes;
+        let enough_blocks = self.used_blocks <= self.free_blocks;
+        match (enough_inodes, enough_blocks) {
+            (true, true) => Ok(()),
+            (true, false) => self.error(&format!(
+                "{} inodes required but only {} available",
+                self.used_inodes, self.free_inodes
+            )),
+            (false, true) => self.error(&format!(
+                "{} free blocks required but only {} available",
+                self.used_blocks, self.free_blocks
+            )),
+            (false, false) => self.error(&format!(
+                "{} inodes required but only {} available; {} free blocks required but only {} available",
+                self.used_inodes, self.free_inodes, self.used_blocks, self.free_blocks
+            )),
         }
+    }
+
+    fn error(&self, msg: &str) -> io::Result<()> {
+        Err(io::Error::new(io::ErrorKind::OutOfMemory, msg))
     }
 }
 
@@ -53,7 +76,7 @@ impl<'a> DeserializerInternals<'a> for DryRunDeserializerInternals<'a> {
     }
 
     fn build_root(&mut self) -> DryRunDirectoryWriter {
-        unimplemented!()
+        DryRunDirectoryWriter::new(self.block_size)
     }
 
     fn deserialize_directory(
@@ -63,8 +86,7 @@ impl<'a> DeserializerInternals<'a> for DryRunDeserializerInternals<'a> {
         parent_directory_writer: &mut DryRunDirectoryWriter,
     ) -> DryRunDirectoryWriter {
         self.build_file(name, parent_directory_writer);
-        // new writer
-        unimplemented!()
+        DryRunDirectoryWriter::new(self.block_size)
     }
 
     fn deserialize_regular_file(

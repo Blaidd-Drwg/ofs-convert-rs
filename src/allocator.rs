@@ -203,6 +203,10 @@ impl<'a> Allocator<'a> {
         unsafe { slice::from_raw_parts_mut(self.partition_ptr.add(start_byte), self.cluster_size) }
     }
 
+    pub fn free_block_count(&self) -> usize {
+        self.used_ranges.free_element_count(self.cursor.get(), self.max_cluster_idx())
+    }
+
     /// Returns the position in `self.partition_data` at which the cluster `idx` starts or None if
     /// the cluster is not in `self.partition_data`.
     fn cluster_start_byte(&self, idx: &AllocatedClusterIdx) -> Option<usize> {
@@ -213,11 +217,10 @@ impl<'a> Allocator<'a> {
 
     /// Returns the next range at or after `self.cursor` that is not used, or Err if such a range does not exist.
     fn find_next_free_range(&self, cursor: u32) -> Result<Range<ClusterIdx>, io::Error> {
-        let max_cluster_idx = self.first_valid_index + (self.partition_len / self.cluster_size) as u32;
         let non_used_range = self.used_ranges.next_not_covered(cursor);
         let non_used_range = match non_used_range {
             NotCoveredRange::Bounded(range) => range,
-            NotCoveredRange::Unbounded(start) => start..max_cluster_idx,
+            NotCoveredRange::Unbounded(start) => start..self.max_cluster_idx(),
         };
 
         if non_used_range.is_empty() {
@@ -228,6 +231,10 @@ impl<'a> Allocator<'a> {
         } else {
             Ok(non_used_range)
         }
+    }
+
+    fn max_cluster_idx(&self) -> ClusterIdx {
+        self.first_valid_index + (self.partition_len / self.cluster_size) as u32
     }
 }
 

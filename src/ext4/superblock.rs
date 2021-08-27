@@ -4,7 +4,7 @@ use std::io;
 use num::Integer;
 use uuid::Uuid;
 
-use crate::ext4::{FIRST_BLOCK_PADDING, FIRST_NON_RESERVED_INODE};
+use crate::ext4::{FIRST_BLOCK_PADDING, FIRST_EXISTING_INODE, FIRST_NON_RESERVED_INODE};
 use crate::fat::{BootSector, ClusterIdx};
 use crate::lohi::{LoHi, LoHiMut};
 use crate::ranges::Ranges;
@@ -247,6 +247,11 @@ impl SuperBlock {
             }
         }
         Ok(sb)
+    }
+
+    // TODO test
+    pub fn free_inode_count(&self) -> usize {
+        (self.s_inodes_count - (FIRST_NON_RESERVED_INODE - FIRST_EXISTING_INODE)) as usize
     }
 
     pub fn block_group_overhead(&self, has_superblock: HasSuperBlock) -> u64 {

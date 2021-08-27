@@ -1,10 +1,11 @@
 use std::any::Any;
+use std::io;
 use std::marker::PhantomData;
 use std::ops::Range;
 use std::rc::Rc;
 
 use crate::allocator::{AllocatedClusterIdx, Allocator};
-use crate::ext4::{Ext4Dentry, Ext4DentrySized, Ext4Partition, Extent, Inode};
+use crate::ext4::{Ext4Dentry, Ext4DentrySized, Ext4Partition, Extent, Inode, SuperBlock};
 use crate::fat::{ClusterIdx, FatDentry, FatPartition};
 use crate::serialization::{Deserializer, DeserializerInternals, DirectoryWriter, DryRunDeserializer, Reader};
 
@@ -23,8 +24,10 @@ impl<'a> Ext4TreeDeserializer<'a> {
         reader: Reader<'a>,
         allocator: Allocator<'a>,
         partition: FatPartition<'a>,
-    ) -> Result<Self, ()> {
-        DryRunDeserializer::dry_run()?;
+    ) -> io::Result<Self> {
+        let free_inodes = SuperBlock::from(partition.boot_sector())?.free_inode_count();
+        let free_blocks = allocator.free_block_count();
+        DryRunDeserializer::dry_run(reader.clone(), free_inodes, free_blocks, partition.cluster_size())?;
         Ok(Self::new(reader, allocator, partition.into_ext4()))
     }
 }
