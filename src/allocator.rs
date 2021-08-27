@@ -197,7 +197,7 @@ impl<'a> Allocator<'a> {
         let start_byte = self
             .cluster_start_byte(idx)
             .expect("Attempted to access an allocated cluster that has been made invalid");
-        assert!(start_byte + self.cluster_size < self.partition_len);
+        assert!(start_byte + self.cluster_size <= self.partition_len);
         // SAFETY: The data is valid and since `idx` is unique and we borrowed it mutably, nobody else can access the
         // data.
         unsafe { slice::from_raw_parts_mut(self.partition_ptr.add(start_byte), self.cluster_size) }
