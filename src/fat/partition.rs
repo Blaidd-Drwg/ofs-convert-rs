@@ -72,7 +72,7 @@ impl<'a> FatPartition<'a> {
         let instance = Self::new(partition_ptr, partition_len, lifetime);
         let allocator = Allocator::new(
             partition_ptr,
-            partition_len,
+            instance.boot_sector.partition_size() as usize,
             instance.cluster_size(),
             instance.used_ranges(),
             lifetime,
