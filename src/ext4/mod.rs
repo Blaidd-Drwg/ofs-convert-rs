@@ -1,17 +1,17 @@
 mod block_group;
 mod dentry;
 mod extent;
+mod fs;
 mod group_descriptor;
 mod inode;
-mod partition;
 mod superblock;
 
 pub use self::block_group::*;
 pub use self::dentry::*;
 pub use self::extent::*;
+pub use self::fs::*;
 pub use self::group_descriptor::*;
 pub use self::inode::*;
-pub use self::partition::*;
 pub use self::superblock::*;
 
 /// The first block in the partition is padded with 1024 bytes. If the block size is also 1024 bytes, the entire first

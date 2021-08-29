@@ -2,31 +2,31 @@ use std::iter::Peekable;
 
 use itertools::free::join;
 
-use crate::fat::{FatFile, FatPartition, FatPseudoDentry, FatTableIndex};
+use crate::fat::{FatFile, FatFs, FatPseudoDentry, FatTableIndex};
 use crate::util::ExactAlign;
 
 pub struct FatFileIter<'a, I>
 where I: Iterator<Item = &'a FatPseudoDentry>
 {
     pseudo_dentry_iter: Peekable<I>,
-    partition: &'a FatPartition<'a>,
+    fat_fs: &'a FatFs<'a>,
 }
 
 impl<'a> FatFileIter<'a, FatPseudoDentryIter<'a, FatIdxIter<'a>>> {
     /// SAFETY: safe if `start_fat_idx` belongs to a directory
-    pub unsafe fn new(start_fat_idx: FatTableIndex, partition: &'a FatPartition<'a>) -> Self {
-        let pseudo_dentry_iter = FatPseudoDentryIter::new(start_fat_idx, partition);
-        Self::from_pseudo_dentry_iter(pseudo_dentry_iter, partition)
+    pub unsafe fn new(start_fat_idx: FatTableIndex, fat_fs: &'a FatFs<'a>) -> Self {
+        let pseudo_dentry_iter = FatPseudoDentryIter::new(start_fat_idx, fat_fs);
+        Self::from_pseudo_dentry_iter(pseudo_dentry_iter, fat_fs)
     }
 }
 
 impl<'a, I> FatFileIter<'a, I>
 where I: Iterator<Item = &'a FatPseudoDentry>
 {
-    pub fn from_pseudo_dentry_iter(pseudo_dentry_iter: I, partition: &'a FatPartition<'a>) -> Self {
+    pub fn from_pseudo_dentry_iter(pseudo_dentry_iter: I, fat_fs: &'a FatFs<'a>) -> Self {
         Self {
             pseudo_dentry_iter: pseudo_dentry_iter.peekable(),
-            partition,
+            fat_fs,
         }
     }
 }
@@ -50,7 +50,7 @@ where I: Iterator<Item = &'a FatPseudoDentry>
         let file = FatFile {
             name: file_name,
             dentry: *dentry,
-            data_ranges: self.partition.data_ranges(dentry.first_fat_index()),
+            data_ranges: self.fat_fs.data_ranges(dentry.first_fat_index()),
         };
         Some(file)
     }
@@ -72,7 +72,7 @@ where I: Iterator<Item = &'a FatPseudoDentry>
                 .pseudo_dentry_iter
                 .next()
                 .and_then(FatPseudoDentry::as_long_file_name)
-                .expect("FAT partition contains malformed LFN entry");
+                .expect("FAT filesystem contains malformed LFN entry");
             file_name_components.push(long_file_name.to_utf8_string());
             lfn_entries.push(long_file_name.to_utf16_string());
         }
@@ -90,14 +90,14 @@ where I: Iterator<Item = FatTableIndex>
     fat_idx_iter: I,
     current_cluster: Option<&'a [FatPseudoDentry]>,
     current_dentry_idx: usize,
-    partition: &'a FatPartition<'a>,
+    fat_fs: &'a FatFs<'a>,
 }
 
 impl<'a> FatPseudoDentryIter<'a, FatIdxIter<'a>> {
     /// SAFETY: Safe if `start_fat_idx` belongs to a directory
-    pub unsafe fn new(start_fat_idx: FatTableIndex, partition: &'a FatPartition<'a>) -> Self {
-        let fat_idx_iter = FatIdxIter::new(start_fat_idx, partition.fat_table());
-        Self::from_cluster_iter(fat_idx_iter, partition)
+    pub unsafe fn new(start_fat_idx: FatTableIndex, fat_fs: &'a FatFs<'a>) -> Self {
+        let fat_idx_iter = FatIdxIter::new(start_fat_idx, fat_fs.fat_table());
+        Self::from_cluster_iter(fat_idx_iter, fat_fs)
     }
 }
 
@@ -105,12 +105,12 @@ impl<'a, I> FatPseudoDentryIter<'a, I>
 where I: Iterator<Item = FatTableIndex>
 {
     /// SAFETY: Safe only if `fat_idx_iter` iterates only over clusters belonging to a directory
-    pub unsafe fn from_cluster_iter(fat_idx_iter: I, partition: &'a FatPartition<'a>) -> Self {
+    pub unsafe fn from_cluster_iter(fat_idx_iter: I, fat_fs: &'a FatFs<'a>) -> Self {
         let mut instance = Self {
             fat_idx_iter,
             current_cluster: None,
             current_dentry_idx: 0,
-            partition,
+            fat_fs,
         };
         instance.get_next_cluster();
         instance
@@ -120,7 +120,7 @@ where I: Iterator<Item = FatTableIndex>
     /// Possibly invalid or dot dir
     fn try_next(&mut self) -> Option<&'a FatPseudoDentry> {
         self.current_cluster?;
-        if self.current_dentry_idx >= self.partition.dentries_per_cluster() {
+        if self.current_dentry_idx >= self.fat_fs.dentries_per_cluster() {
             self.get_next_cluster();
             self.current_dentry_idx = 0;
         }
@@ -132,10 +132,10 @@ where I: Iterator<Item = FatTableIndex>
 
     fn get_next_cluster(&mut self) {
         self.current_cluster = self.fat_idx_iter.next().map(|fat_idx| {
-            let cluster = self.partition.data_cluster(fat_idx.to_data_cluster_idx());
+            let cluster = self.fat_fs.data_cluster(fat_idx.to_data_cluster_idx());
             // SAFETY: safe, since directory data is a sequence of pseudo-dentries
             let dentries = unsafe { cluster.exact_align_to::<FatPseudoDentry>() };
-            assert_eq!(dentries.len(), self.partition.dentries_per_cluster());
+            assert_eq!(dentries.len(), self.fat_fs.dentries_per_cluster());
             dentries
         });
     }

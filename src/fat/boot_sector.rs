@@ -36,18 +36,18 @@ pub struct BootSector {
 }
 
 impl BootSector {
-    /// Returns the range in bytes of the first FAT table, relative to the partition start
+    /// Returns the range in bytes of the first FAT table, relative to the filesystem start
     pub fn get_fat_table_range(&self) -> Range<usize> {
         let fat_table_start_byte = usize::from(self.sectors_before_fat) * usize::from(self.bytes_per_sector);
         let fat_table_len = usize::try_from(self.sectors_per_fat).unwrap() * usize::from(self.bytes_per_sector);
         fat_table_start_byte..fat_table_start_byte + fat_table_len
     }
 
-    /// Returns the range in bytes of the data region, relative to the partition start
+    /// Returns the range in bytes of the data region, relative to the filesystem start
     pub fn get_data_range(&self) -> Range<usize> {
         let first_data_byte = self.first_data_sector() as usize * usize::from(self.bytes_per_sector);
-        let partition_size = usize::from(self.bytes_per_sector) * usize::try_from(self.sector_count()).unwrap();
-        first_data_byte..partition_size
+        let fs_size = usize::from(self.bytes_per_sector) * usize::try_from(self.sector_count()).unwrap();
+        first_data_byte..fs_size
     }
 
     fn first_data_sector(&self) -> u32 {
@@ -67,7 +67,7 @@ impl BootSector {
     }
 
     /// in bytes
-    pub fn partition_size(&self) -> u64 {
+    pub fn fs_size(&self) -> u64 {
         u64::from(self.bytes_per_sector) * u64::from(self.sector_count())
     }
 

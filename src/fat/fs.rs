@@ -5,7 +5,7 @@ use std::ops::Range;
 use std::slice;
 
 use crate::allocator::Allocator;
-use crate::ext4::Ext4Partition;
+use crate::ext4::Ext4Fs;
 use crate::fat::{
     BootSector, Cluster, ClusterIdx, DataClusterIdx, FatFile, FatFileIter, FatIdxIter, FatTableIndex, ROOT_FAT_IDX,
 };
@@ -15,7 +15,7 @@ use crate::util::ExactAlign;
 
 /// A FAT32 partition consists of 3 regions: the reserved sectors (which include the boot sector),
 /// the file allocation table (FAT), and the data region.
-pub struct FatPartition<'a> {
+pub struct FatFs<'a> {
     boot_sector: &'a BootSector,
     fat_table: &'a [FatTableIndex],
     data_ptr: *const u8,
@@ -23,12 +23,12 @@ pub struct FatPartition<'a> {
     _lifetime: PhantomData<&'a ()>,
 }
 
-impl<'a> FatPartition<'a> {
+impl<'a> FatFs<'a> {
     /// SAFETY: The caller must guarantee that:
     /// - the `partition_len` bytes starting at `partition_ptr` are all valid memory;
     /// - this memory will remain valid for the lifetime 'a;
-    /// - this memory represents a consistent FAT partition;
-    /// - no pointer to one of the sections used by the FAT partition (i.e. the boot sector, the FAT table(s), and any
+    /// - this memory represents a consistent FAT filesystem;
+    /// - no pointer to one of the sections used by the FAT filesystem (i.e. the boot sector, the FAT table(s), and any
     ///   cluster that is not marked as free in the FAT table) will be dereferenced during the lifetime 'a.
     pub unsafe fn new(partition_ptr: *mut u8, partition_len: usize, _lifetime: PhantomData<&'a ()>) -> Self {
         assert!(size_of::<BootSector>() <= partition_len);
@@ -57,22 +57,22 @@ impl<'a> FatPartition<'a> {
     /// SAFETY: The caller must guarantee that:
     /// - the `partition_len` bytes starting at `partition_ptr` are all valid memory;
     /// - this memory will remain valid for the lifetime 'a;
-    /// - this memory represents a consistent FAT partition;
+    /// - this memory represents a consistent FAT filesystem;
     /// - no pointer to this memory will be dereferenced during the lifetime 'a.
     pub unsafe fn new_with_allocator(
         partition_ptr: *mut u8,
         partition_len: usize,
         lifetime: PhantomData<&'a ()>,
     ) -> (Self, Allocator) {
-        // We want to borrow the partition's memory twice: immutably in FatPartition and mutably in Allocator. To avoid
-        // aliasing, we divide the partition into used clusters (i.e. the reserved clusters, the FAT clusters, and the
+        // We want to borrow the filesystem's memory twice: immutably in `FatFs` and mutably in `Allocator`. To avoid
+        // aliasing, we divide the filesystem into used clusters (i.e. the reserved clusters, the FAT clusters, and the
         // data clusters that contain data) and unused clusters (i.e. the data clusters that contain no data).
-        // FatPartition will only ever dereference pointers to used clusters. Allocator will only ever dereference
+        // `FatFs` will only ever dereference pointers to used clusters. `Allocator` will only ever dereference
         // pointers to unused clusters.
         let instance = Self::new(partition_ptr, partition_len, lifetime);
         let allocator = Allocator::new(
             partition_ptr,
-            instance.boot_sector.partition_size() as usize,
+            instance.boot_sector.fs_size() as usize,
             instance.cluster_size(),
             instance.used_ranges(),
             lifetime,
@@ -80,9 +80,9 @@ impl<'a> FatPartition<'a> {
         (instance, allocator)
     }
 
-    pub fn into_ext4(self) -> Ext4Partition<'a> {
+    pub fn into_ext4(self) -> Ext4Fs<'a> {
         let start_ptr = self.boot_sector as *const _ as *mut u8;
-        unsafe { Ext4Partition::from(start_ptr, self.boot_sector) }
+        unsafe { Ext4Fs::from(start_ptr, self.boot_sector) }
     }
 
     pub fn boot_sector(&self) -> &BootSector {
@@ -151,7 +151,7 @@ impl<'a> FatPartition<'a> {
         ranges
     }
 
-    /// Returns the occupied clusters in the partition
+    /// Returns the occupied clusters in the filesystem
     pub fn used_ranges(&self) -> Ranges<ClusterIdx> {
         let mut ranges = Ranges::new();
         let first_data_cluster_idx = self.boot_sector.first_data_cluster();
@@ -207,8 +207,8 @@ mod tests {
 
         let mut partition = Partition::open("examples/fat.master.bak").unwrap();
         unsafe {
-            let fat_partition = FatPartition::new(partition.as_mut_slice());
-            let file_names: HashSet<_> = fat_partition.dir_content_iter(ROOT_FAT_IDX).map(|file| file.name).collect();
+            let fat_fs = FatFs::new(partition.as_mut_slice());
+            let file_names: HashSet<_> = fat_fs.dir_content_iter(ROOT_FAT_IDX).map(|file| file.name).collect();
             assert_eq!(file_names, expected_file_names);
         }
     }

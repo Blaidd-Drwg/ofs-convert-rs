@@ -9,13 +9,13 @@ use crate::ext4::{
 };
 use crate::fat::{BootSector, ClusterIdx};
 
-pub struct Ext4Partition<'a> {
+pub struct Ext4Fs<'a> {
     block_groups: Vec<BlockGroup<'a>>,
     /// Used for allocating inodes
     next_free_inode_no: u32,
 }
 
-impl<'a> Ext4Partition<'a> {
+impl<'a> Ext4Fs<'a> {
     /// SAFETY: Safe if `partition_ptr` is valid for reads for `boot_sector.partition_len()` many bytes, and no memory
     /// belonging to a blocks in `superblock.block_group_overhead_ranges()` is dereferenced for the duration of the
     /// lifetime `'a`.
@@ -147,7 +147,7 @@ impl<'a> Ext4Partition<'a> {
     }
 }
 
-impl Drop for Ext4Partition<'_> {
+impl Drop for Ext4Fs<'_> {
     fn drop(&mut self) {
         // Fill in sum fields in superblock with data from group descriptors
         self.superblock_mut().s_free_inodes_count = self

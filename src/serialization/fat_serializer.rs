@@ -7,7 +7,7 @@ use std::rc::Rc;
 use chrono::prelude::*;
 
 use crate::allocator::Allocator;
-use crate::fat::{ClusterIdx, FatDentry, FatFile, FatPartition, ROOT_FAT_IDX};
+use crate::fat::{ClusterIdx, FatDentry, FatFile, FatFs, ROOT_FAT_IDX};
 use crate::ranges::Ranges;
 use crate::serialization::{Ext4TreeDeserializer, FileType, StreamArchiver};
 
@@ -15,10 +15,10 @@ use crate::serialization::{Ext4TreeDeserializer, FileType, StreamArchiver};
 type Timestamp = u32;
 
 pub struct FatTreeSerializer<'a> {
-    partition: FatPartition<'a>,
+    fat_fs: FatFs<'a>,
     allocator: Rc<Allocator<'a>>, /* Rc to be shared with `self.stream_archiver` and nobody else, otherwise
                                    * `into_deserializer` will panic */
-    stream_archiver: RefCell<StreamArchiver<'a>>, /* `serialize_directory` borrows `self.partition` twice, so it has
+    stream_archiver: RefCell<StreamArchiver<'a>>, /* `serialize_directory` borrows `self.fat_fs` twice, so it has
                                                    * to borrow `self` immutably. However, it also needs to mutate
                                                    * `self.stream_archiver`, so we wrap it in a RefCell. */
     forbidden_ranges: Ranges<ClusterIdx>, /* ranges that cannot contain any data as they will be overwritten with
@@ -64,12 +64,12 @@ pub fn fat_time_to_unix_time(date: u16, time: Option<u16>) -> u32 {
 }
 
 impl<'a> FatTreeSerializer<'a> {
-    pub fn new(allocator: Allocator<'a>, partition: FatPartition<'a>, forbidden_ranges: Ranges<ClusterIdx>) -> Self {
+    pub fn new(allocator: Allocator<'a>, fat_fs: FatFs<'a>, forbidden_ranges: Ranges<ClusterIdx>) -> Self {
         let allocator = Rc::new(allocator);
-        let stream_archiver = StreamArchiver::new(allocator.clone(), partition.cluster_size() as usize);
+        let stream_archiver = StreamArchiver::new(allocator.clone(), fat_fs.cluster_size() as usize);
         Self {
             allocator,
-            partition,
+            fat_fs,
             stream_archiver: RefCell::new(stream_archiver),
             forbidden_ranges,
         }
@@ -77,11 +77,11 @@ impl<'a> FatTreeSerializer<'a> {
 
     pub fn serialize_directory_tree(&mut self) {
         // SAFETY: safe because `ROOT_FAT_IDX` belongs to the root directory
-        let root_child_count = unsafe { self.partition.dir_content_iter(ROOT_FAT_IDX).count() };
+        let root_child_count = unsafe { self.fat_fs.dir_content_iter(ROOT_FAT_IDX).count() };
         self.archive_root_child_count(root_child_count.try_into().unwrap());
 
         // SAFETY: safe because `ROOT_FAT_IDX` belongs to the root directory
-        for mut file in unsafe { self.partition.dir_content_iter(ROOT_FAT_IDX) } {
+        for mut file in unsafe { self.fat_fs.dir_content_iter(ROOT_FAT_IDX) } {
             if file.dentry.is_dir() {
                 self.serialize_directory(file);
             } else {
@@ -95,11 +95,11 @@ impl<'a> FatTreeSerializer<'a> {
         assert!(file.dentry.is_dir());
         let first_fat_idx = file.dentry.first_fat_index();
         // SAFETY: safe because `first_fat_index` belongs to a directory
-        let child_count = unsafe { self.partition.dir_content_iter(first_fat_idx).count() };
+        let child_count = unsafe { self.fat_fs.dir_content_iter(first_fat_idx).count() };
         self.archive_directory(file, child_count.try_into().unwrap());
 
         // SAFETY: safe because `first_fat_index` belongs to a directory
-        for mut file in unsafe { self.partition.dir_content_iter(first_fat_idx) } {
+        for mut file in unsafe { self.fat_fs.dir_content_iter(first_fat_idx) } {
             if file.dentry.is_dir() {
                 self.serialize_directory(file);
             } else {
@@ -150,8 +150,8 @@ impl<'a> FatTreeSerializer<'a> {
             let mut allocated = self.allocator.allocate(range.len());
             let allocated_len = allocated.len();
             for (old_cluster_idx, mut new_cluster_idx) in range.clone().zip(allocated.iter_mut()) {
-                let old_data_cluster_idx = self.partition.cluster_idx_to_data_cluster_idx(old_cluster_idx).unwrap();
-                let old_cluster = self.partition.data_cluster(old_data_cluster_idx);
+                let old_data_cluster_idx = self.fat_fs.cluster_idx_to_data_cluster_idx(old_cluster_idx).unwrap();
+                let old_cluster = self.fat_fs.data_cluster(old_data_cluster_idx);
                 self.allocator.cluster_mut(&mut new_cluster_idx).copy_from_slice(old_cluster);
             }
             range.start += allocated_len as u32;
@@ -163,6 +163,6 @@ impl<'a> FatTreeSerializer<'a> {
     pub fn into_deserializer(self) -> io::Result<Ext4TreeDeserializer<'a>> {
         std::mem::drop(self.allocator); // drop the Rc, allowing `self.stream_archiver` to unwrap it
         let (reader, allocator) = self.stream_archiver.into_inner().into_reader();
-        Ext4TreeDeserializer::new_with_dry_run(reader, allocator, self.partition)
+        Ext4TreeDeserializer::new_with_dry_run(reader, allocator, self.fat_fs)
     }
 }

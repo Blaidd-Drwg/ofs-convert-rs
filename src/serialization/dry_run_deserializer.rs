@@ -31,7 +31,7 @@ pub struct DryRunDeserializerInternals<'a> {
 }
 
 impl<'a> DryRunDeserializerInternals<'a> {
-    // TODO pass partition to constructor instead?
+    // TODO pass fs to constructor instead?
     pub fn new(reader: Reader<'a>, free_inodes: usize, free_blocks: usize, block_size: usize) -> Self {
         Self {
             reader,

@@ -93,10 +93,10 @@ impl Iterator for AllocatedIterMut<'_> {
 /// such a cluster through the methods `cluster` and `cluster_mut`.
 #[derive(Debug)]
 pub struct Allocator<'a> {
-    partition_ptr: *mut u8,
-    partition_len: usize,
+    fs_ptr: *mut u8,
+    fs_len: usize,
     /// the cluster that the Allocator will try to allocate next.
-    /// Invariant: first_valid_index <= cursor <= partition_len * cluster_size
+    /// Invariant: first_valid_index <= cursor <= fs_len * cluster_size
     cursor: Cell<ClusterIdx>,
     /// clusters before this index are marked as used and cannot be accessed over the methods `cluster` and
     /// `cluster_mut`
@@ -111,15 +111,15 @@ impl<'a> Allocator<'a> {
     /// SAFETY: Instantiating more than one `Allocator` can lead to undefined behavior, as mixing `AllocatedClusterIdx`
     /// allocated by different `Allocator`s can lead to aliasing.
     pub unsafe fn new(
-        partition_ptr: *mut u8,
-        partition_len: usize,
+        fs_ptr: *mut u8,
+        fs_len: usize,
         cluster_size: usize,
         used_ranges: Ranges<ClusterIdx>,
         _lifetime: PhantomData<&'a ()>,
     ) -> Self {
         Self {
-            partition_ptr,
-            partition_len,
+            fs_ptr,
+            fs_len,
             cursor: Cell::new(0),
             first_valid_index: 0,
             used_ranges,
@@ -144,21 +144,21 @@ impl<'a> Allocator<'a> {
         // TODO free ranges used for FAT dentries
 
         let reader = AllocatedReader {
-            partition_ptr: self.partition_ptr,
-            partition_len: cursor_byte,
+            fs_ptr: self.fs_ptr,
+            fs_len: cursor_byte,
             cluster_size: self.cluster_size,
             _lifetime: self._lifetime,
         };
 
-        // SAFETY: safe since the `partition_len` bytes after `partition_ptr` are valid memory and because of the
-        // invariant `cursor_byte <= partition_len`, the `new_partition_len` bytes after `new_partition_ptr` are valid
+        // SAFETY: safe since the `fs_len` bytes after `fs_ptr` are valid memory and because of the
+        // invariant `cursor_byte <= fs_len`, the `new_fs_len` bytes after `new_fs_ptr` are valid
         // memory as well.
-        let new_partition_ptr = unsafe { self.partition_ptr.add(cursor_byte) };
-        let new_partition_len = self.partition_len - cursor_byte;
+        let new_fs_ptr = unsafe { self.fs_ptr.add(cursor_byte) };
+        let new_fs_len = self.fs_len - cursor_byte;
 
         let allocator = Self {
-            partition_ptr: new_partition_ptr,
-            partition_len: new_partition_len,
+            fs_ptr: new_fs_ptr,
+            fs_len: new_fs_len,
             first_valid_index: self.cursor.get(),
             cursor: self.cursor,
             used_ranges: self.used_ranges,
@@ -188,25 +188,26 @@ impl<'a> Allocator<'a> {
         let start_byte = self
             .cluster_start_byte(idx)
             .expect("Attempted to access an allocated cluster that has been made invalid");
-        assert!(start_byte + self.cluster_size < self.partition_len);
+        assert!(start_byte + self.cluster_size < self.fs_len);
         // SAFETY: The data is valid and since `idx` is unique and we borrowed it, nobody else can mutate the data.
-        unsafe { slice::from_raw_parts(self.partition_ptr.add(start_byte), self.cluster_size) }
+        unsafe { slice::from_raw_parts(self.fs_ptr.add(start_byte), self.cluster_size) }
     }
 
     pub fn cluster_mut(&self, idx: &mut AllocatedClusterIdx) -> &mut [u8] {
         let start_byte = self
             .cluster_start_byte(idx)
             .expect("Attempted to access an allocated cluster that has been made invalid");
-        assert!(start_byte + self.cluster_size <= self.partition_len);
+        assert!(start_byte + self.cluster_size <= self.fs_len);
         // SAFETY: The data is valid and since `idx` is unique and we borrowed it mutably, nobody else can access the
         // data.
-        unsafe { slice::from_raw_parts_mut(self.partition_ptr.add(start_byte), self.cluster_size) }
+        unsafe { slice::from_raw_parts_mut(self.fs_ptr.add(start_byte), self.cluster_size) }
     }
 
     pub fn free_block_count(&self) -> usize {
         self.used_ranges.free_element_count(self.cursor.get(), self.max_cluster_idx())
     }
 
+    // TODO documentation
     /// Returns the position in `self.partition_data` at which the cluster `idx` starts or None if
     /// the cluster is not in `self.partition_data`.
     fn cluster_start_byte(&self, idx: &AllocatedClusterIdx) -> Option<usize> {
@@ -226,7 +227,7 @@ impl<'a> Allocator<'a> {
         if non_used_range.is_empty() {
             Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
-                "No free clusters left in the partition",
+                "No free clusters left in the filesystem",
             ))
         } else {
             Ok(non_used_range)
@@ -234,15 +235,15 @@ impl<'a> Allocator<'a> {
     }
 
     fn max_cluster_idx(&self) -> ClusterIdx {
-        self.first_valid_index + (self.partition_len / self.cluster_size) as u32
+        self.first_valid_index + (self.fs_len / self.cluster_size) as u32
     }
 }
 
 
 // no first_valid_index because in our use case it's always 0
 pub struct AllocatedReader<'a> {
-    partition_ptr: *const u8,
-    partition_len: usize,
+    fs_ptr: *const u8,
+    fs_len: usize,
     cluster_size: usize,
     _lifetime: PhantomData<&'a ()>,
 }
@@ -250,8 +251,8 @@ pub struct AllocatedReader<'a> {
 impl<'a> AllocatedReader<'a> {
     pub fn cluster(&self, idx: AllocatedClusterIdx) -> &'a [u8] {
         let start_byte = self.cluster_size * usize::from(idx);
-        assert!(start_byte + self.cluster_size <= self.partition_len);
+        assert!(start_byte + self.cluster_size <= self.fs_len);
         // SAFETY: The data is valid and since `idx` is unique and we borrowed it, nobody can mutate the data.
-        unsafe { slice::from_raw_parts(self.partition_ptr.add(start_byte), self.cluster_size) }
+        unsafe { slice::from_raw_parts(self.fs_ptr.add(start_byte), self.cluster_size) }
     }
 }

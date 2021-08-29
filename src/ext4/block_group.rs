@@ -18,9 +18,9 @@ pub struct BlockGroup<'a> {
 }
 
 impl<'a> BlockGroup<'a> {
-    pub unsafe fn new(partition_ptr: *mut u8, info: Ext4BlockGroupConstructionInfo) -> Self {
+    pub unsafe fn new(fs_ptr: *mut u8, info: Ext4BlockGroupConstructionInfo) -> Self {
         let start_byte = info.start_block as usize * info.block_size as usize;
-        let block_group_ptr = partition_ptr.add(start_byte);
+        let block_group_ptr = fs_ptr.add(start_byte);
         let (inode_table_ptr, inode_table_len) = Self::init_inode_table(block_group_ptr, info);
 
         Self {

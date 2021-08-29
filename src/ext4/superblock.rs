@@ -141,19 +141,15 @@ impl SuperBlock {
             // We want to treat FAT clusters as ext4 blocks, but we can't if they're not aligned
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "The FAT partition's must be aligned to its cluster size (for more info, see the -a option in the \
-                 mkfs.fat man page).",
+                "The FAT filesystem's data section must be aligned to its cluster size (for more info, see the -a \
+                 option in the mkfs.fat man page).",
             ));
         }
 
-        Self::new(
-            boot_sector.partition_size(),
-            boot_sector.cluster_size(),
-            boot_sector.volume_label(),
-        )
+        Self::new(boot_sector.fs_size(), boot_sector.cluster_size(), boot_sector.volume_label())
     }
 
-    pub fn new(partition_len: u64, block_size: usize, volume_label: &[u8]) -> io::Result<Self> {
+    pub fn new(fs_len: u64, block_size: usize, volume_label: &[u8]) -> io::Result<Self> {
         assert!(volume_label.len() <= VOLUME_NAME_LEN);
 
         // SAFETY: This allows us to skip initializing a ton of fields to zero, but
@@ -164,7 +160,7 @@ impl SuperBlock {
         if block_size < MIN_BLOCK_SIZE {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "The FAT partition's cluster size must be >= 1kB",
+                "The FAT filesystem's cluster size must be >= 1kB",
             ));
         }
 
@@ -211,7 +207,7 @@ impl SuperBlock {
         // We use the sparse_super2 logic from mke2fs, meaning that the last block
         // group always has a super block copy.
         // TODO we would have to move data the falls outside of the bg into a bg, do we do that?
-        let mut block_count = partition_len / u64::try_from(block_size).unwrap();
+        let mut block_count = fs_len / u64::try_from(block_size).unwrap();
         let mut data_block_count = block_count - sb.s_first_data_block as u64;
         // set the intermediate value in `sb` because it is needed by the call to `sb.block_group_overhead`.
         LoHiMut::new(&mut sb.s_blocks_count_lo, &mut sb.s_blocks_count_hi).set(block_count);
@@ -229,7 +225,7 @@ impl SuperBlock {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
-                    "Partition too small, it would have fewer than {} usable blocks.",
+                    "Filesystem too small, it would have fewer than {} usable blocks.",
                     MIN_USABLE_BLOCKS_PER_GROUP
                 ),
             ));
