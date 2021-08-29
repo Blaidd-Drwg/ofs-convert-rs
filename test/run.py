@@ -2,6 +2,7 @@
 import os
 import pathlib
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -56,10 +57,16 @@ class OfsConvertTest(unittest.TestCase):
                                                   image_mounter)
                 ext4_image_path = temp_dir / 'ext4.img'
                 shutil.copyfile(str(fat_image_path), str(ext4_image_path))
-                self._convert_to_ext4(tool_runner, ext4_image_path)
-                self._run_fsck_ext4(tool_runner, ext4_image_path)
-                self._check_contents(tool_runner, image_mounter, fat_image_path,
-                                     ext4_image_path)
+                error_regex = self._expected_error_regex(input_dir)
+                if error_regex:
+                    with self.assertRaises(subprocess.CalledProcessError) as context:
+                        self._convert_to_ext4(tool_runner, ext4_image_path)
+                    self._check_error(context.exception, error_regex)
+                else:
+                    self._convert_to_ext4(tool_runner, ext4_image_path)
+                    self._run_fsck_ext4(tool_runner, ext4_image_path)
+                    self._check_contents(tool_runner, image_mounter, fat_image_path,
+                                         ext4_image_path)
             except Exception:
                 tool_runner.write_output()
                 raise
@@ -103,6 +110,13 @@ class OfsConvertTest(unittest.TestCase):
                 tool_runner.run(args, 'rsync',
                                 custom_output_checker=self._check_rsync_output)
 
+    def _check_error(self, exception, error_regex):
+        self.assertRegex(
+            exception.stderr.decode('utf-8'),
+            error_regex,
+            'ofs-convert failed with a different error message than expected'
+        )
+
     @staticmethod
     def _check_mkfs_fat_output(proc):
         stderr = proc.stderr.decode('utf-8')
@@ -122,6 +136,15 @@ class OfsConvertTest(unittest.TestCase):
             tool_runner.run([str(input_dir / 'generate.sh'), str(mount_point)],
                             'gen script')
         return image_file_path
+
+    @staticmethod
+    def _expected_error_regex(input_dir):
+        expected_error_file = input_dir / 'expected.err'
+        if not expected_error_file.exists():
+            return None
+
+        with open(expected_error_file) as f:
+            return f.read()
 
 
 if __name__ == '__main__':
