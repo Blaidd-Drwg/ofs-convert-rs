@@ -1,7 +1,9 @@
 use std::cell::Cell;
 use std::marker::PhantomData;
 use std::ops::Range;
-use std::{io, slice};
+use std::slice;
+
+use anyhow::{bail, Result};
 
 use crate::fat::ClusterIdx;
 use crate::ranges::{NotCoveredRange, Ranges};
@@ -217,7 +219,7 @@ impl<'a> Allocator<'a> {
     }
 
     /// Returns the next range at or after `self.cursor` that is not used, or Err if such a range does not exist.
-    fn find_next_free_range(&self, cursor: u32) -> Result<Range<ClusterIdx>, io::Error> {
+    fn find_next_free_range(&self, cursor: u32) -> Result<Range<ClusterIdx>> {
         let non_used_range = self.used_ranges.next_not_covered(cursor);
         let non_used_range = match non_used_range {
             NotCoveredRange::Bounded(range) => range,
@@ -225,10 +227,7 @@ impl<'a> Allocator<'a> {
         };
 
         if non_used_range.is_empty() {
-            Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "No free clusters left in the filesystem",
-            ))
+            bail!("No free clusters left in the filesystem")
         } else {
             Ok(non_used_range)
         }

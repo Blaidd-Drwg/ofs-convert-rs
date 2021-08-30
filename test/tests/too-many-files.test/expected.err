@@ -1,1 +1,1 @@
-.*\d+ inodes required but only \d+ available.*
+.*\d+ free inodes required but only \d+ available.*

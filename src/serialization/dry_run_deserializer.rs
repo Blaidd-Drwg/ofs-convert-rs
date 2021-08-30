@@ -1,7 +1,8 @@
 use std::any::Any;
-use std::io;
 use std::marker::PhantomData;
 use std::ops::Range;
+
+use anyhow::{bail, Result};
 
 use crate::ext4::{Ext4Dentry, ExtentTree};
 use crate::fat::{ClusterIdx, FatDentry};
@@ -11,7 +12,7 @@ use crate::serialization::{Deserializer, DeserializerInternals, DirectoryWriter,
 pub type DryRunDeserializer<'a> = Deserializer<'a, DryRunDeserializerInternals<'a>>;
 
 impl<'a> DryRunDeserializer<'a> {
-    pub fn dry_run(reader: Reader<'a>, free_inodes: usize, free_blocks: usize, block_size: usize) -> io::Result<()> {
+    pub fn dry_run(reader: Reader<'a>, free_inodes: usize, free_blocks: usize, block_size: usize) -> Result<()> {
         let mut instance = Self {
             internals: DryRunDeserializerInternals::new(reader, free_inodes, free_blocks, block_size),
             _lifetime: PhantomData,
@@ -43,28 +44,29 @@ impl<'a> DryRunDeserializerInternals<'a> {
         }
     }
 
-    fn result(&self) -> io::Result<()> {
+    fn result(&self) -> Result<()> {
         let enough_inodes = self.used_inodes <= self.free_inodes;
         let enough_blocks = self.used_blocks <= self.free_blocks;
         match (enough_inodes, enough_blocks) {
             (true, true) => Ok(()),
-            (true, false) => self.error(&format!(
+            (true, false) => bail!(
                 "{} free blocks required but only {} available",
-                self.used_blocks, self.free_blocks
-            )),
-            (false, true) => self.error(&format!(
-                "{} inodes required but only {} available",
-                self.used_inodes, self.free_inodes
-            )),
-            (false, false) => self.error(&format!(
+                self.used_blocks,
+                self.free_blocks
+            ),
+            (false, true) => bail!(
+                "{} free inodes required but only {} available",
+                self.used_inodes,
+                self.free_inodes
+            ),
+            (false, false) => bail!(
                 "{} free blocks required but only {} available; {} inodes required but only {} available",
-                self.used_blocks, self.free_blocks, self.used_inodes, self.free_inodes
-            )),
+                self.used_blocks,
+                self.free_blocks,
+                self.used_inodes,
+                self.free_inodes
+            ),
         }
-    }
-
-    fn error(&self, msg: &str) -> io::Result<()> {
-        Err(io::Error::new(io::ErrorKind::OutOfMemory, msg))
     }
 }
 

@@ -2,6 +2,7 @@ use std::mem::size_of;
 use std::ops::Range;
 use std::slice;
 
+use anyhow::{bail, Result};
 use num::Integer;
 use static_assertions::const_assert_eq;
 
@@ -236,7 +237,7 @@ impl<'a> ExtentTreeLevel<'a> {
         }
     }
 
-    pub fn add_extent(&mut self, extent: Extent, allocator: &Allocator<'a>) -> Result<Vec<ClusterIdx>, ()> {
+    pub fn add_extent(&mut self, extent: Extent, allocator: &Allocator<'a>) -> Result<Vec<ClusterIdx>> {
         // try to append directly to self
         if self.header.is_leaf() {
             // if this did not work, there is nothing we as a leaf can do about it
@@ -269,12 +270,8 @@ impl<'a> ExtentTreeLevel<'a> {
         }
     }
 
-    fn add_extent_with_new_leaf(&mut self, extent: Extent, allocator: &Allocator<'_>) -> Result<Vec<ClusterIdx>, ()> {
-        if self.header.is_full() {
-            return Err(());
-        }
-
-        let allocated_block = self.add_child_level(extent.logical_start, allocator);
+    fn add_extent_with_new_leaf(&mut self, extent: Extent, allocator: &Allocator<'_>) -> Result<Vec<ClusterIdx>> {
+        let allocated_block = self.add_child_level(extent.logical_start, allocator)?;
         let mut child_level = self.last_child_level(allocator);
         if child_level.header.is_leaf() {
             child_level.append_extent(extent).map(|_| vec![allocated_block])
@@ -288,7 +285,11 @@ impl<'a> ExtentTreeLevel<'a> {
         }
     }
 
-    fn add_child_level(&mut self, logical_start: u32, allocator: &Allocator<'_>) -> ClusterIdx {
+    fn add_child_level(&mut self, logical_start: u32, allocator: &Allocator<'_>) -> Result<ClusterIdx> {
+        if self.header.is_full() {
+            bail!("Extent tree level full, cannot add new child level");
+        }
+
         let mut new_child_block_idx = allocator.allocate_one();
         let cluster_idx = new_child_block_idx.as_cluster_idx();
         let new_child_block = allocator.cluster_mut(&mut new_child_block_idx);
@@ -298,24 +299,23 @@ impl<'a> ExtentTreeLevel<'a> {
         entries[0].header = ExtentHeader::from_parent(*self.header, entries.len() as u16);
 
         self.append_extent_idx(ExtentIdx::new(logical_start, new_child_block_idx))
-            .expect("Failed to add an ExtentIdx to an empty tree level");
-        cluster_idx
+            .and(Ok(cluster_idx))
     }
 
-    pub fn append_extent(&mut self, extent: Extent) -> Result<(), ()> {
+    pub fn append_extent(&mut self, extent: Extent) -> Result<()> {
         assert!(self.header.is_leaf());
         self.append_entry(ExtentTreeElement { extent })
     }
 
-    pub fn append_extent_idx(&mut self, idx: ExtentIdx) -> Result<(), ()> {
+    pub fn append_extent_idx(&mut self, idx: ExtentIdx) -> Result<()> {
         assert!(!self.header.is_leaf());
         self.append_entry(ExtentTreeElement { idx })
     }
 
     /// Appends an entry to `self.entries`, returns Err is `entries` is already full.
-    fn append_entry(&mut self, entry: ExtentTreeElement) -> Result<(), ()> {
+    fn append_entry(&mut self, entry: ExtentTreeElement) -> Result<()> {
         if self.header.is_full() {
-            Err(())
+            bail!("Extent tree level full, cannot append new entry")
         } else {
             let idx = self.header.valid_entry_count as usize;
             self.all_entries[idx] = entry;

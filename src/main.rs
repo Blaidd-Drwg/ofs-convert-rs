@@ -11,9 +11,9 @@ mod serialization;
 mod util;
 
 use std::env::args;
-use std::io;
 use std::mem::size_of;
 
+use anyhow::Result;
 use static_assertions::const_assert;
 
 use crate::ext4::SuperBlock;
@@ -49,7 +49,7 @@ fn print_help() {
 }
 
 /// SAFETY: `partition_path` must be a path to a valid FAT partition. TODO update when all the C parts are ported
-unsafe fn ofs_convert(partition_path: &str) -> io::Result<()> {
+unsafe fn ofs_convert(partition_path: &str) -> Result<()> {
     let mut partition = Partition::open(partition_path)?;
     let (fat_fs, mut allocator) =
         FatFs::new_with_allocator(partition.as_mut_ptr(), partition.len(), partition.lifetime);

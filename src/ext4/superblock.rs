@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
-use std::io;
 
+use anyhow::{bail, Result};
 use num::Integer;
 use uuid::Uuid;
 
@@ -136,20 +136,19 @@ pub struct SuperBlock {
 }
 
 impl SuperBlock {
-    pub fn from(boot_sector: &BootSector) -> io::Result<Self> {
+    pub fn from(boot_sector: &BootSector) -> Result<Self> {
         if boot_sector.get_data_range().start % boot_sector.cluster_size() != 0 {
             // We want to treat FAT clusters as ext4 blocks, but we can't if they're not aligned
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
+            bail!(
                 "The FAT filesystem's data section must be aligned to its cluster size (for more info, see the -a \
                  option in the mkfs.fat man page).",
-            ));
+            );
         }
 
         Self::new(boot_sector.fs_size(), boot_sector.cluster_size(), boot_sector.volume_label())
     }
 
-    pub fn new(fs_len: u64, block_size: usize, volume_label: &[u8]) -> io::Result<Self> {
+    pub fn new(fs_len: u64, block_size: usize, volume_label: &[u8]) -> Result<Self> {
         assert!(volume_label.len() <= VOLUME_NAME_LEN);
 
         // SAFETY: This allows us to skip initializing a ton of fields to zero, but
@@ -158,18 +157,12 @@ impl SuperBlock {
         let mut sb: Self = unsafe { std::mem::zeroed() };
 
         if block_size < MIN_BLOCK_SIZE {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "The FAT filesystem's cluster size must be >= 1kB",
-            ));
+            bail!("The FAT filesystem's cluster size must be >= 1kB");
         }
 
         let log_block_size = (block_size as f64).log2().round() as u32;
         if 2_usize.pow(log_block_size) != block_size {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "FAT cluster size is not a power of 2",
-            ));
+            bail!("FAT cluster size is not a power of 2");
         }
         sb.s_log_block_size = log_block_size - BLOCK_SIZE_MIN_LOG2;
         // check whether the entire first block is padding
@@ -222,13 +215,10 @@ impl SuperBlock {
         }
 
         if data_block_count == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "Filesystem too small, it would have fewer than {} usable blocks.",
-                    MIN_USABLE_BLOCKS_PER_GROUP
-                ),
-            ));
+            bail!(
+                "Filesystem too small, it would have fewer than {} usable blocks.",
+                MIN_USABLE_BLOCKS_PER_GROUP
+            );
         }
 
         // Same logic as in mke2fs

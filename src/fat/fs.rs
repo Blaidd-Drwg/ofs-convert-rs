@@ -4,6 +4,8 @@ use std::mem::size_of;
 use std::ops::Range;
 use std::slice;
 
+use anyhow::{bail, Result};
+
 use crate::allocator::Allocator;
 use crate::ext4::Ext4Fs;
 use crate::fat::{
@@ -105,11 +107,11 @@ impl<'a> FatFs<'a> {
     }
 
     // TODO these conversions are a mess
-    pub fn cluster_idx_to_data_cluster_idx(&self, cluster_idx: ClusterIdx) -> Result<DataClusterIdx, &str> {
+    pub fn cluster_idx_to_data_cluster_idx(&self, cluster_idx: ClusterIdx) -> Result<DataClusterIdx> {
         let data_cluster_idx = cluster_idx.checked_sub(self.boot_sector.first_data_cluster());
         match data_cluster_idx {
             Some(data_cluster_idx) => Ok(DataClusterIdx::new(data_cluster_idx)),
-            None => Err("cluster_idx is not a data cluster index"),
+            None => bail!("cluster_idx is not a data cluster index"),
         }
     }
 

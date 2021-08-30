@@ -1,11 +1,11 @@
 use std::fs::{File, OpenOptions};
-use std::io::{self, ErrorKind};
 use std::marker::PhantomData;
 use std::os::unix::fs::FileTypeExt;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::process::Command;
 
+use anyhow::{bail, Result};
 use fs2::FileExt;
 use memmap::{MmapMut, MmapOptions};
 use nix::ioctl_read;
@@ -17,10 +17,10 @@ pub struct Partition<'a> {
 }
 
 impl<'a> Partition<'a> {
-    pub fn open<P: AsRef<Path>>(partition_path: P) -> io::Result<Self> {
+    pub fn open<P: AsRef<Path>>(partition_path: P) -> Result<Self> {
         let partition_path = partition_path.as_ref().canonicalize()?;
         if Self::is_mounted(partition_path.as_path())? {
-            return Err(io::Error::new(io::ErrorKind::AddrInUse, "Partition is already mounted"));
+            bail!("Partition is already mounted");
         }
         let file = OpenOptions::new().read(true).write(true).create(false).open(partition_path)?;
         // the lock is only advisory, other processes may still access the file
@@ -41,7 +41,7 @@ impl<'a> Partition<'a> {
         self.mmap.as_mut_ptr()
     }
 
-    fn get_file_size(file: &File) -> io::Result<usize> {
+    fn get_file_size(file: &File) -> Result<usize> {
         let metadata = file.metadata()?;
         let filetype = metadata.file_type();
         if filetype.is_file() {
@@ -50,15 +50,12 @@ impl<'a> Partition<'a> {
             return Ok(Self::get_block_device_size as usize);
         }
 
-        Err(io::Error::new(
-            ErrorKind::InvalidInput,
-            "Expected path to a file or a block device",
-        ))
+        bail!("Expected path to a file or a block device")
     }
 
     // error_chain?
     /// partition_path must be absolute
-    fn is_mounted(partition_path: &Path) -> io::Result<bool> {
+    fn is_mounted(partition_path: &Path) -> Result<bool> {
         let path_str = partition_path.to_str().expect("Partition path is not valid UTF-8");
         let output =
             String::from_utf8(Command::new("mount").output()?.stdout).expect("mount output is not valid UTF-8");
@@ -71,20 +68,14 @@ impl<'a> Partition<'a> {
     ioctl_read!(block_device_size, 0x12, 114, usize);
 
     #[cfg(target_os = "linux")]
-    fn get_block_device_size(file: &File) -> io::Result<usize> {
+    fn get_block_device_size(file: &File) -> Result<usize> {
         debug_assert!(file.metadata().unwrap().file_type().is_block_device());
         let mut size = 0;
         // SAFETY: the nix crate provides no safety documentation, so we must just assume that this is safe.
         unsafe {
-            match Self::block_device_size(file.as_raw_fd(), &mut size) {
-                Err(e) => Err(Self::nix_error_to_io_error(e)),
-                Ok(_) => Ok(size),
-            }
+            Self::block_device_size(file.as_raw_fd(), &mut size)?;
         }
-    }
-
-    fn nix_error_to_io_error(err: nix::Error) -> io::Error {
-        io::Error::new(io::ErrorKind::Other, err.to_string())
+        Ok(size)
     }
 }
 

@@ -1,8 +1,9 @@
 use std::any::Any;
-use std::io;
 use std::marker::PhantomData;
 use std::ops::Range;
 use std::rc::Rc;
+
+use anyhow::Result;
 
 use crate::allocator::{AllocatedClusterIdx, Allocator};
 use crate::ext4::{Ext4Dentry, Ext4DentrySized, Ext4Fs, Extent, Inode, SuperBlock};
@@ -20,7 +21,7 @@ impl<'a> Ext4TreeDeserializer<'a> {
         }
     }
 
-    pub fn new_with_dry_run(reader: Reader<'a>, allocator: Allocator<'a>, fat_fs: FatFs<'a>) -> io::Result<Self> {
+    pub fn new_with_dry_run(reader: Reader<'a>, allocator: Allocator<'a>, fat_fs: FatFs<'a>) -> Result<Self> {
         let free_inodes = SuperBlock::from(fat_fs.boot_sector())?.free_inode_count();
         let free_blocks = allocator.free_block_count();
         DryRunDeserializer::dry_run(reader.clone(), free_inodes, free_blocks, fat_fs.cluster_size())?;
