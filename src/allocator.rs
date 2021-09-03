@@ -89,10 +89,14 @@ impl Iterator for AllocatedIterMut<'_> {
     }
 }
 
-/// Allocates clusters that are not marked as in use (specifically, clusters that are marked as
-/// free in the FAT and which will not be overwritten by Ext4 block group metadata). Callers are
-/// guaranteed that a cluster allocated to them will not be accessed anywhere else. They can access
-/// such a cluster through the methods `cluster` and `cluster_mut`.
+/// Allocates clusters that are not marked as in use (specifically, clusters that are marked as free in the FAT and
+/// which will not be overwritten by Ext4 block group metadata). Callers are guaranteed that a cluster allocated to them
+/// will not be accessed anywhere else. They can access such a cluster through the methods `cluster` and `cluster_mut`.
+// A pretty cool thing that Rust's type system allows you to do is using lifetimes to "brand" an `AllocatedClusterIdx`
+// so that it can be ensured at compile-time that it's only ever used by the `Allocator` that instantiated it (see the
+// `ghost-cell` crate for reference). Unfortunately, the only way to do so at the moment is quite hacky (the `Allocator`
+// can only be used within a closure that is passed to its constructor), so we decided against it to not overcomplicated
+// `Allocator`'s interface.
 #[derive(Debug)]
 pub struct Allocator<'a> {
     fs_ptr: *mut u8,
