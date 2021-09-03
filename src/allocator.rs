@@ -4,9 +4,13 @@ use std::ops::Range;
 use std::slice;
 
 use anyhow::{bail, Result};
+use type_variance::{Invariant, Lifetime};
 
-use crate::fat::ClusterIdx;
+// use crate::fat::ClusterIdx;
 use crate::ranges::{NotCoveredRange, Ranges};
+
+type AllocatorId<'id> = Invariant<Lifetime<'id>>;
+type ClusterIdx = u32;
 
 // TODO after reading, make directory dataclusters free
 // TODO ensure DataClusterIdx can also not be constructed
@@ -14,19 +18,13 @@ use crate::ranges::{NotCoveredRange, Ranges};
 /// access that cluster, either through the `Allocator` itself or through the `AllocatedReader` derived from it.
 /// Invariant: no two `AllocatedClusterIdx` may have the same value; otherwise, `Allocator::cluster_mut` might alias.
 #[derive(PartialEq, PartialOrd)]
-pub struct AllocatedClusterIdx(ClusterIdx);
-impl AllocatedClusterIdx {
-    /// SAFETY: Instantiating an `AllocatedClusterIdx` might break the invariant! To avoid aliasing, the caller must
-    /// ensure that `idx` was originally created from an `AllocatedClusterIdx` and that the original and the clone are
-    /// not used to access a cluster simultaneously.
-    pub unsafe fn new(idx: ClusterIdx) -> Self {
-        Self(idx)
-    }
+pub struct AllocatedClusterIdx<'id>(ClusterIdx, AllocatorId<'id>);
 
+impl<'id> AllocatedClusterIdx<'id> {
     /// SAFETY: Cloning an `AllocatedClusterIdx` breaks the invariant! To avoid aliasing, the caller must ensure that
     /// the original and the clone are not used to access a cluster simultaneously.
     pub unsafe fn clone(&self) -> Self {
-        Self(self.0)
+        Self(self.0, self.1)
     }
 
     /// SAFETY: This is safe since it cannot be converted back to an `AllocatedClusterIdx` or to a `DataClusterIdx`.
@@ -36,13 +34,13 @@ impl AllocatedClusterIdx {
     }
 }
 
-impl From<AllocatedClusterIdx> for ClusterIdx {
+impl From<AllocatedClusterIdx<'_>> for ClusterIdx {
     fn from(idx: AllocatedClusterIdx) -> Self {
         idx.0
     }
 }
 
-impl From<AllocatedClusterIdx> for usize {
+impl From<AllocatedClusterIdx<'_>> for usize {
     fn from(idx: AllocatedClusterIdx) -> Self {
         idx.0 as Self
     }
@@ -50,42 +48,42 @@ impl From<AllocatedClusterIdx> for usize {
 
 /// A newtype that can only be instantiated by an `Allocator` to ensure that a range of `AllocatedClusterIdx` can only
 /// be used as an iterator if every cluster in that range has indeed been allocated.
-pub struct AllocatedRange(Range<AllocatedClusterIdx>);
+pub struct AllocatedRange<'id>(Range<AllocatedClusterIdx<'id>>);
 
-impl AllocatedRange {
+impl<'id> AllocatedRange<'id> {
     pub fn len(&self) -> usize {
         self.0.end.0 as usize - self.0.start.0 as usize
     }
 
-    pub fn iter_mut(&mut self) -> AllocatedIterMut {
+    pub fn iter_mut(&mut self) -> AllocatedIterMut<'_, 'id> {
         AllocatedIterMut::new(self)
     }
 }
 
-impl From<AllocatedRange> for Range<AllocatedClusterIdx> {
-    fn from(range: AllocatedRange) -> Self {
+impl<'id> From<AllocatedRange<'id>> for Range<AllocatedClusterIdx<'id>> {
+    fn from(range: AllocatedRange<'id>) -> Self {
         range.0
     }
 }
 
-impl From<AllocatedRange> for Range<ClusterIdx> {
+impl From<AllocatedRange<'_>> for Range<ClusterIdx> {
     fn from(range: AllocatedRange) -> Self {
         range.0.start.into()..range.0.end.into()
     }
 }
 
-pub struct AllocatedIterMut<'a>(Range<ClusterIdx>, PhantomData<&'a ()>);
-impl<'a> AllocatedIterMut<'a> {
-    fn new(range: &'a mut AllocatedRange) -> Self {
+pub struct AllocatedIterMut<'borrow, 'id>(Range<ClusterIdx>, PhantomData<&'borrow ()>, AllocatorId<'id>);
+impl<'borrow, 'id> AllocatedIterMut<'borrow, 'id> {
+    fn new(range: &'borrow mut AllocatedRange) -> Self {
         let range = range.0.start.0..range.0.end.0;
-        Self(range, PhantomData)
+        Self(range, PhantomData, AllocatorId::default())
     }
 }
 
-impl Iterator for AllocatedIterMut<'_> {
-    type Item = AllocatedClusterIdx;
+impl<'id> Iterator for AllocatedIterMut<'_, 'id> {
+    type Item = AllocatedClusterIdx<'id>;
     fn next(&mut self) -> Option<Self::Item> {
-        self.0.next().map(AllocatedClusterIdx)
+        self.0.next().map(|idx| AllocatedClusterIdx(idx, self.2))
     }
 }
 
@@ -94,7 +92,7 @@ impl Iterator for AllocatedIterMut<'_> {
 /// guaranteed that a cluster allocated to them will not be accessed anywhere else. They can access
 /// such a cluster through the methods `cluster` and `cluster_mut`.
 #[derive(Debug)]
-pub struct Allocator<'a> {
+pub struct Allocator<'partition, 'id> {
     fs_ptr: *mut u8,
     fs_len: usize,
     /// the cluster that the Allocator will try to allocate next.
@@ -106,18 +104,35 @@ pub struct Allocator<'a> {
     /// clusters that will not be allocated
     used_ranges: Ranges<ClusterIdx>,
     cluster_size: usize,
-    _lifetime: PhantomData<&'a ()>,
+    _lifetime: PhantomData<&'partition ()>,
+    id: AllocatorId<'id>,
 }
 
-impl<'a> Allocator<'a> {
-    /// SAFETY: Instantiating more than one `Allocator` can lead to undefined behavior, as mixing `AllocatedClusterIdx`
-    /// allocated by different `Allocator`s can lead to aliasing.
-    pub unsafe fn new(
+impl<'partition, 'id> Allocator<'partition, 'id> {
+    pub unsafe fn do_with_allocator<F, ReturnType>(
         fs_ptr: *mut u8,
         fs_len: usize,
         cluster_size: usize,
         used_ranges: Ranges<ClusterIdx>,
-        _lifetime: PhantomData<&'a ()>,
+        _lifetime: PhantomData<&'partition ()>,
+        f: F,
+    ) -> ReturnType
+    where
+        F: for<'new_id> FnOnce(Allocator<'partition, 'new_id>) -> ReturnType,
+    {
+        let allocator = Allocator::new(fs_ptr, fs_len, cluster_size, used_ranges, _lifetime, AllocatorId::default());
+        f(allocator)
+    }
+
+    /// SAFETY: Instantiating more than one `Allocator` can lead to undefined behavior, as mixing `AllocatedClusterIdx`
+    /// allocated by different `Allocator`s can lead to aliasing.
+    unsafe fn new(
+        fs_ptr: *mut u8,
+        fs_len: usize,
+        cluster_size: usize,
+        used_ranges: Ranges<ClusterIdx>,
+        _lifetime: PhantomData<&'partition ()>,
+        id: AllocatorId<'id>,
     ) -> Self {
         Self {
             fs_ptr,
@@ -127,6 +142,7 @@ impl<'a> Allocator<'a> {
             used_ranges,
             cluster_size,
             _lifetime,
+            id,
         }
     }
 
@@ -141,7 +157,7 @@ impl<'a> Allocator<'a> {
     /// Splits the `Allocator` into an `AllocatedReader` and an `Allocator`: the `AllocatedReader` can
     /// only read clusters that were allocated by `self`, the `Allocator` can only write and read
     /// clusters that could have been allocated by `self` but were not yet allocated.
-    pub fn split_into_reader(self) -> (AllocatedReader<'a>, Self) {
+    pub fn split_into_reader<'new_id>(self) -> (AllocatedReader<'partition, 'id>, Allocator<'partition, 'new_id>) {
         let cursor_byte = self.cursor.get() as usize * self.cluster_size;
         // TODO free ranges used for FAT dentries
 
@@ -150,6 +166,7 @@ impl<'a> Allocator<'a> {
             fs_len: cursor_byte,
             cluster_size: self.cluster_size,
             _lifetime: self._lifetime,
+            id: self.id,
         };
 
         // SAFETY: safe since the `fs_len` bytes after `fs_ptr` are valid memory and because of the
@@ -158,7 +175,7 @@ impl<'a> Allocator<'a> {
         let new_fs_ptr = unsafe { self.fs_ptr.add(cursor_byte) };
         let new_fs_len = self.fs_len - cursor_byte;
 
-        let allocator = Self {
+        let allocator = Allocator {
             fs_ptr: new_fs_ptr,
             fs_len: new_fs_len,
             first_valid_index: self.cursor.get(),
@@ -166,27 +183,28 @@ impl<'a> Allocator<'a> {
             used_ranges: self.used_ranges,
             cluster_size: self.cluster_size,
             _lifetime: self._lifetime,
+            id: AllocatorId::<'new_id>::default(),
         };
 
         (reader, allocator)
     }
 
-    pub fn allocate_one(&self) -> AllocatedClusterIdx {
+    pub fn allocate_one(&self) -> AllocatedClusterIdx<'id> {
         Range::from(self.allocate(1)).start
     }
 
     /// Returns a cluster range that may be exclusively used by the caller with 1 <= `range.len()` <= `max_length`.
     // TODO error handling
-    pub fn allocate(&self, max_length: usize) -> AllocatedRange {
+    pub fn allocate(&self, max_length: usize) -> AllocatedRange<'id> {
         let free_range = self
             .find_next_free_range(self.cursor.get())
             .expect("Oh no, no more free blocks :(((");
         let range_end = free_range.end.min(free_range.start + max_length as u32);
         self.cursor.set(range_end);
-        AllocatedRange(AllocatedClusterIdx(free_range.start)..AllocatedClusterIdx(range_end))
+        AllocatedRange(AllocatedClusterIdx(free_range.start, self.id)..AllocatedClusterIdx(range_end, self.id))
     }
 
-    pub fn cluster(&'a self, idx: &AllocatedClusterIdx) -> &[u8] {
+    pub fn cluster(&'partition self, idx: &AllocatedClusterIdx<'id>) -> &[u8] {
         let start_byte = self
             .cluster_start_byte(idx)
             .expect("Attempted to access an allocated cluster that has been made invalid");
@@ -195,7 +213,7 @@ impl<'a> Allocator<'a> {
         unsafe { slice::from_raw_parts(self.fs_ptr.add(start_byte), self.cluster_size) }
     }
 
-    pub fn cluster_mut(&self, idx: &mut AllocatedClusterIdx) -> &mut [u8] {
+    pub fn cluster_mut(&self, idx: &mut AllocatedClusterIdx<'id>) -> &mut [u8] {
         let start_byte = self
             .cluster_start_byte(idx)
             .expect("Attempted to access an allocated cluster that has been made invalid");
@@ -203,6 +221,13 @@ impl<'a> Allocator<'a> {
         // SAFETY: The data is valid and since `idx` is unique and we borrowed it mutably, nobody else can access the
         // data.
         unsafe { slice::from_raw_parts_mut(self.fs_ptr.add(start_byte), self.cluster_size) }
+    }
+
+    /// SAFETY: Instantiating an `AllocatedClusterIdx` might break the invariant! To avoid aliasing, the caller must
+    /// ensure that `idx` was originally created from an `AllocatedClusterIdx` and that the original and the clone are
+    /// not used to access a cluster simultaneously.
+    pub unsafe fn new_allocated_cluster_idx(&self, idx: ClusterIdx) -> AllocatedClusterIdx<'id> {
+        AllocatedClusterIdx(idx, self.id)
     }
 
     pub fn free_block_count(&self) -> usize {
@@ -240,15 +265,36 @@ impl<'a> Allocator<'a> {
 
 
 // no first_valid_index because in our use case it's always 0
-pub struct AllocatedReader<'a> {
+pub struct AllocatedReader<'partition, 'id> {
     fs_ptr: *const u8,
     fs_len: usize,
     cluster_size: usize,
-    _lifetime: PhantomData<&'a ()>,
+    _lifetime: PhantomData<&'partition ()>,
+    id: AllocatorId<'id>,
 }
 
-impl<'a> AllocatedReader<'a> {
-    pub fn cluster(&self, idx: AllocatedClusterIdx) -> &'a [u8] {
+impl<'partition, 'id> AllocatedReader<'partition, 'id> {
+    pub fn do_with_new<F, ReturnType>(
+        fs_ptr: *mut u8,
+        fs_len: usize,
+        cluster_size: usize,
+        _lifetime: PhantomData<&'partition ()>,
+        f: F,
+    ) -> ReturnType
+    where
+        F: for<'new_id> FnOnce(AllocatedReader<'partition, 'new_id>) -> ReturnType,
+    {
+        let reader = AllocatedReader::new(fs_ptr, fs_len, cluster_size, _lifetime, AllocatorId::default());
+        f(reader)
+    }
+
+    fn new(fs_ptr: *mut u8, fs_len: usize, cluster_size: usize, _lifetime: PhantomData<&'partition ()>, id: AllocatorId<'id>) -> Self {
+        Self {
+            fs_ptr, fs_len, cluster_size, _lifetime, id
+        }
+    }
+
+    pub fn cluster(&self, idx: AllocatedClusterIdx<'id>) -> &'partition [u8] {
         let start_byte = self.cluster_size * usize::from(idx);
         assert!(start_byte + self.cluster_size <= self.fs_len);
         // SAFETY: The data is valid and since `idx` is unique and we borrowed it, nobody can mutate the data.

@@ -61,25 +61,30 @@ impl<'a> FatFs<'a> {
     /// - this memory will remain valid for the lifetime 'a;
     /// - this memory represents a consistent FAT filesystem;
     /// - no pointer to this memory will be dereferenced during the lifetime 'a.
-    pub unsafe fn new_with_allocator(
+    pub unsafe fn do_with_allocator<F, ReturnType>(
         partition_ptr: *mut u8,
         partition_len: usize,
         lifetime: PhantomData<&'a ()>,
-    ) -> (Self, Allocator) {
+        f: F,
+    ) -> ReturnType
+    where
+        F: for<'new_id> FnOnce(Self, Allocator<'new_id>) -> ReturnType,
+    {
         // We want to borrow the filesystem's memory twice: immutably in `FatFs` and mutably in `Allocator`. To avoid
         // aliasing, we divide the filesystem into used clusters (i.e. the reserved clusters, the FAT clusters, and the
         // data clusters that contain data) and unused clusters (i.e. the data clusters that contain no data).
         // `FatFs` will only ever dereference pointers to used clusters. `Allocator` will only ever dereference
         // pointers to unused clusters.
         let instance = Self::new(partition_ptr, partition_len, lifetime);
-        let allocator = Allocator::new(
+        // let f_partial = move |allocator| f(instance, allocator);
+        Allocator::do_with_allocator(
             partition_ptr,
             instance.boot_sector.fs_size() as usize,
             instance.cluster_size(),
             instance.used_ranges(),
             lifetime,
-        );
-        (instance, allocator)
+            move |allocator: Allocator| f(instance, allocator)
+        )
     }
 
     pub fn into_ext4(self) -> Ext4Fs<'a> {

@@ -208,6 +208,7 @@ dependencies = [
  "num",
  "static_assertions",
  "tempfile",
+ "type-variance",
  "uuid",
 ]
 
@@ -305,6 +306,12 @@ dependencies = [
  "wasi",
  "winapi",
 ]
+
+[[package]]
+name = "type-variance"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae798ec329aee58fe027dc440bb2ba27790e577123d43d0a91d5ed550d238cc6"
 
 [[package]]
 name = "uuid"

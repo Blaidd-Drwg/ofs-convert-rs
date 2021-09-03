@@ -16,6 +16,7 @@ uuid = { version = "0.8.2", features = ["v4"] }
 itertools = "0.10.0"
 static_assertions = "1.1.0"
 anyhow = "1.0.43"
+type-variance = "0.1.0"
 
 [build-dependencies]
 cmake = "0.1.45"

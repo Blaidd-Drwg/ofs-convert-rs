@@ -1,25 +1,27 @@
 #![allow(dead_code)]
 
 mod allocator;
-mod bitmap;
-mod ext4;
-mod fat;
-mod lohi;
+// mod bitmap;
+// mod ext4;
+// mod fat;
+// mod lohi;
 mod partition;
 mod ranges;
-mod serialization;
-mod util;
+// mod serialization;
+// mod util;
 
 use std::env::args;
 use std::mem::size_of;
 
 use anyhow::Result;
 use static_assertions::const_assert;
+use crate::allocator::Allocator;
+use crate::ranges::Ranges;
 
-use crate::ext4::SuperBlock;
-use crate::fat::FatFs;
+// use crate::ext4::SuperBlock;
+// use crate::fat::FatFs;
 use crate::partition::Partition;
-use crate::serialization::FatTreeSerializer;
+// use crate::serialization::FatTreeSerializer;
 
 const_assert!(size_of::<usize>() >= size_of::<u32>());
 
@@ -51,21 +53,34 @@ fn print_help() {
 /// SAFETY: `partition_path` must be a path to a valid FAT partition. TODO update when all the C parts are ported
 unsafe fn ofs_convert(partition_path: &str) -> Result<()> {
     let mut partition = Partition::open(partition_path)?;
-    let (fat_fs, mut allocator) =
-        FatFs::new_with_allocator(partition.as_mut_ptr(), partition.len(), partition.lifetime);
-    let boot_sector = fat_fs.boot_sector();
-    let forbidden_ranges = SuperBlock::from(boot_sector)?.block_group_overhead_ranges();
-    for range in &forbidden_ranges {
-        allocator.forbid(range.clone());
-    }
+    // FatFs::do_with_allocator(partition.as_mut_ptr(), partition.len(), partition.lifetime, |fat_fs, mut allocator| {
+    Allocator::do_with_allocator(partition.as_mut_ptr(), partition.len(), 0, Ranges::new(), partition.lifetime, |mut allocator| {
+        Allocator::do_with_allocator(partition.as_mut_ptr(), partition.len(), 0, Ranges::new(), partition.lifetime, |mut bllocator| {
+            let mut adx = allocator.allocate_one();
+            let mut bdx = bllocator.allocate_one();
+            allocator.cluster_mut(&mut adx);
+            // bllocator.cluster_mut(&mut adx);
+            bllocator.cluster_mut(&mut bdx);
 
-    let mut serializer = FatTreeSerializer::new(allocator, fat_fs, forbidden_ranges);
-    serializer.serialize_directory_tree();
+            let (reader, cllocator) = allocator.split_into_reader();
+            // reader.cluster(adx);
+            cllocator.cluster(&adx);
+        // let boot_sector = fat_fs.boot_sector();
+        // let forbidden_ranges = SuperBlock::from(boot_sector)?.block_group_overhead_ranges();
+        // for range in &forbidden_ranges {
+            // allocator.forbid(range.clone());
+        // }
 
-    let mut deserializer = serializer.into_deserializer().expect("Dry run failed"); // TODO error management
+        // let mut serializer = FatTreeSerializer::new(allocator, fat_fs, forbidden_ranges);
+        // serializer.serialize_directory_tree();
 
-    // This step makes the FAT filesystem inconsistent
-    deserializer.deserialize_directory_tree();
+        // let mut deserializer = serializer.into_deserializer().expect("Dry run failed"); // TODO error management
 
-    Ok(())
+        // // This step makes the FAT filesystem inconsistent
+        // deserializer.deserialize_directory_tree();
+
+        Ok(())
+        })
+    })
 }
+
