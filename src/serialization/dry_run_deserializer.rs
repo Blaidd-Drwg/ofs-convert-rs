@@ -17,7 +17,7 @@ impl<'a> DryRunDeserializer<'a> {
             internals: DryRunDeserializerInternals::new(reader, free_inodes, free_blocks, block_size),
             _lifetime: PhantomData,
         };
-        instance.deserialize_directory_tree();
+        instance.deserialize_directory_tree()?;
         instance.internals.result()
     }
 }
@@ -77,8 +77,8 @@ impl<'a> DeserializerInternals<'a> for DryRunDeserializerInternals<'a> {
         self.reader.next::<T>()
     }
 
-    fn build_root(&mut self) -> DryRunDirectoryWriter {
-        DryRunDirectoryWriter::new(self.block_size)
+    fn build_root(&mut self) -> Result<DryRunDirectoryWriter> {
+        Ok(DryRunDirectoryWriter::new(self.block_size))
     }
 
     fn deserialize_directory(
@@ -86,9 +86,9 @@ impl<'a> DeserializerInternals<'a> for DryRunDeserializerInternals<'a> {
         _dentry: FatDentry,
         name: String,
         parent_directory_writer: &mut DryRunDirectoryWriter,
-    ) -> DryRunDirectoryWriter {
+    ) -> Result<DryRunDirectoryWriter> {
         self.build_file(name, parent_directory_writer);
-        DryRunDirectoryWriter::new(self.block_size)
+        Ok(DryRunDirectoryWriter::new(self.block_size))
     }
 
     fn deserialize_regular_file(
@@ -97,9 +97,10 @@ impl<'a> DeserializerInternals<'a> for DryRunDeserializerInternals<'a> {
         name: String,
         extents: Vec<Range<ClusterIdx>>,
         parent_directory_writer: &mut DryRunDirectoryWriter,
-    ) {
+    ) -> Result<()> {
         self.build_file(name, parent_directory_writer);
         self.used_blocks += ExtentTree::required_block_count(extents.len(), self.block_size);
+        Ok(())
     }
 }
 

@@ -1,3 +1,4 @@
+use anyhow::Result;
 use chrono::prelude::*;
 use nix::unistd::{getegid, geteuid};
 
@@ -90,8 +91,8 @@ impl<'a> Inode<'a> {
         self.inner.i_links_count += 1;
     }
 
-    pub fn add_extent(&mut self, extent: Extent, allocator: &Allocator<'_>) -> Vec<ClusterIdx> {
-        self.extent_tree(allocator).add_extent(extent)
+    pub fn add_extent(&mut self, extent: Extent, allocator: &Allocator<'_>) -> Result<Vec<ClusterIdx>> {
+        Ok(self.extent_tree(allocator).add_extent(extent)?)
     }
 
     fn extent_tree<'b>(&'b mut self, allocator: &'b Allocator<'b>) -> ExtentTree<'b> {

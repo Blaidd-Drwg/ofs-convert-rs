@@ -60,12 +60,12 @@ unsafe fn ofs_convert(partition_path: &str) -> Result<()> {
     }
 
     let mut serializer = FatTreeSerializer::new(allocator, fat_fs, forbidden_ranges);
-    serializer.serialize_directory_tree();
+    serializer.serialize_directory_tree()?;
 
     let mut deserializer = serializer.into_deserializer().expect("Dry run failed"); // TODO error management
 
     // This step makes the FAT filesystem inconsistent
-    deserializer.deserialize_directory_tree();
+    deserializer.deserialize_directory_tree()?;
 
     Ok(())
 }

@@ -1,5 +1,6 @@
 use std::ops::Range;
 
+use anyhow::Result;
 use num::Integer;
 
 use crate::allocator::Allocator;
@@ -55,10 +56,16 @@ impl<'a> Ext4Fs<'a> {
     }
 
     /// Assumes that `inode` currently has no extents.
-    pub fn set_extents(&mut self, inode: &mut Inode, ranges: Vec<Range<ClusterIdx>>, allocator: &Allocator<'_>) {
+    pub fn set_extents(
+        &mut self,
+        inode: &mut Inode,
+        ranges: Vec<Range<ClusterIdx>>,
+        allocator: &Allocator<'_>,
+    ) -> Result<()> {
         for extent in Self::ranges_to_extents(&ranges) {
-            self.register_extent(inode, extent, allocator);
+            self.register_extent(inode, extent, allocator)?;
         }
+        Ok(())
     }
 
     pub fn ranges_to_extents(ranges: &[Range<ClusterIdx>]) -> Vec<Extent> {
@@ -76,13 +83,14 @@ impl<'a> Ext4Fs<'a> {
         extents
     }
 
-    pub fn register_extent(&mut self, inode: &mut Inode, extent: Extent, allocator: &Allocator) {
+    pub fn register_extent(&mut self, inode: &mut Inode, extent: Extent, allocator: &Allocator) -> Result<()> {
         self.mark_range_as_used(inode, extent.as_range());
 
-        let additional_blocks = inode.add_extent(extent, allocator);
+        let additional_blocks = inode.add_extent(extent, allocator)?;
         for block in additional_blocks {
             self.mark_range_as_used(inode, block..block + 1);
         }
+        Ok(())
     }
 
     pub fn block_group_idx_of_block(&self, block_idx: ClusterIdx) -> usize {

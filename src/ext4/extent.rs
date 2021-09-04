@@ -177,21 +177,23 @@ impl<'a> ExtentTree<'a> {
         result
     }
 
-    pub fn add_extent(&mut self, extent: Extent) -> Vec<ClusterIdx> {
+    pub fn add_extent(&mut self, extent: Extent) -> Result<Vec<ClusterIdx>> {
         match self.root.add_extent(extent, self.allocator) {
-            Ok(allocated_blocks) => allocated_blocks,
+            Ok(allocated_blocks) => Ok(allocated_blocks),
             Err(_) => {
-                let block_for_previous_root = self.make_deeper();
-                let mut allocated_blocks =
-                    self.root.add_extent(extent, self.allocator).expect("Unable to register extent");
+                let block_for_previous_root = self.make_deeper()?;
+                let mut allocated_blocks = self
+                    .root
+                    .add_extent(extent, self.allocator)
+                    .expect("Unable to add new extent despite `make_deeper` succeeding");
                 allocated_blocks.push(block_for_previous_root);
-                allocated_blocks
+                Ok(allocated_blocks)
             }
         }
     }
 
-    fn make_deeper(&mut self) -> ClusterIdx {
-        let mut new_block_idx = self.allocator.allocate_one();
+    fn make_deeper(&mut self) -> Result<ClusterIdx> {
+        let mut new_block_idx = self.allocator.allocate_one()?;
         let cluster_idx = new_block_idx.as_cluster_idx();
         let new_block = self.allocator.cluster_mut(&mut new_block_idx);
         // SAFETY: Safe since we later overwrite the first `root_slice.len()` entries and mark all others as invalid
@@ -206,7 +208,7 @@ impl<'a> ExtentTree<'a> {
         self.root
             .append_extent_idx(ExtentIdx::new(0, new_block_idx))
             .expect("Unable to add ExtentIdx within the inode");
-        cluster_idx
+        Ok(cluster_idx)
     }
 }
 
@@ -237,6 +239,8 @@ impl<'a> ExtentTreeLevel<'a> {
         }
     }
 
+    /// Returns the `ClusterIdx`s of the extent tree blocks allocated for this operation, or None if the tree below
+    /// `self` is already full.
     pub fn add_extent(&mut self, extent: Extent, allocator: &Allocator<'a>) -> Result<Vec<ClusterIdx>> {
         // try to append directly to self
         if self.header.is_leaf() {
@@ -270,27 +274,32 @@ impl<'a> ExtentTreeLevel<'a> {
         }
     }
 
+    /// Returns the `ClusterIdx`s of the extent tree blocks allocated for this operation.
     fn add_extent_with_new_leaf(&mut self, extent: Extent, allocator: &Allocator<'_>) -> Result<Vec<ClusterIdx>> {
         let allocated_block = self.add_child_level(extent.logical_start, allocator)?;
         let mut child_level = self.last_child_level(allocator);
         if child_level.header.is_leaf() {
-            child_level.append_extent(extent).map(|_| vec![allocated_block])
-        } else {
             child_level
+                .append_extent(extent)
+                .expect("Unable to append extent to newly added extent tree leaf level");
+            Ok(vec![allocated_block])
+        } else {
+            let mut allocated_blocks = child_level
                 .add_extent_with_new_leaf(extent, allocator)
-                .map(|mut allocated_blocks| {
-                    allocated_blocks.push(allocated_block);
-                    allocated_blocks
-                })
+                .expect("Unable to append extent below a newly added extent tree level");
+            allocated_blocks.push(allocated_block);
+            Ok(allocated_blocks)
         }
     }
 
+    /// Returns the `ClusterIdx` of the block allocated for the new child level, or None if no child level can be added
+    /// because `self` is full.
     fn add_child_level(&mut self, logical_start: u32, allocator: &Allocator<'_>) -> Result<ClusterIdx> {
         if self.header.is_full() {
             bail!("Extent tree level full, cannot add new child level");
         }
 
-        let mut new_child_block_idx = allocator.allocate_one();
+        let mut new_child_block_idx = allocator.allocate_one()?;
         let cluster_idx = new_child_block_idx.as_cluster_idx();
         let new_child_block = allocator.cluster_mut(&mut new_child_block_idx);
         // SAFETY: Safe because we replace the header and regard all other entries as invalid.
@@ -302,13 +311,21 @@ impl<'a> ExtentTreeLevel<'a> {
             .and(Ok(cluster_idx))
     }
 
+    /// PANICS: Panics if `self` is not a leaf level
     pub fn append_extent(&mut self, extent: Extent) -> Result<()> {
-        assert!(self.header.is_leaf());
+        assert!(
+            self.header.is_leaf(),
+            "Attempted to append an extent to a non-leaf level of the extent tree"
+        );
         self.append_entry(ExtentTreeElement { extent })
     }
 
+    /// PANICS: Panics if `self` is a leaf level
     pub fn append_extent_idx(&mut self, idx: ExtentIdx) -> Result<()> {
-        assert!(!self.header.is_leaf());
+        assert!(
+            !self.header.is_leaf(),
+            "Attempted to append an extent index to a leaf level of the extent tree"
+        );
         self.append_entry(ExtentTreeElement { idx })
     }
 

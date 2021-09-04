@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::fmt::{Display, Formatter};
 use std::marker::PhantomData;
 use std::ops::Range;
 use std::slice;
@@ -45,6 +46,12 @@ impl From<AllocatedClusterIdx> for ClusterIdx {
 impl From<AllocatedClusterIdx> for usize {
     fn from(idx: AllocatedClusterIdx) -> Self {
         idx.0 as Self
+    }
+}
+
+impl Display for AllocatedClusterIdx {
+    fn fmt(&self, formatter: &mut Formatter) -> std::result::Result<(), std::fmt::Error> {
+        self.0.fmt(formatter)
     }
 }
 
@@ -175,35 +182,34 @@ impl<'a> Allocator<'a> {
         (reader, allocator)
     }
 
-    pub fn allocate_one(&self) -> AllocatedClusterIdx {
-        Range::from(self.allocate(1)).start
+    pub fn allocate_one(&self) -> Result<AllocatedClusterIdx> {
+        Ok(Range::from(self.allocate(1)?).start)
     }
 
     /// Returns a cluster range that may be exclusively used by the caller with 1 <= `range.len()` <= `max_length`.
-    // TODO error handling
-    pub fn allocate(&self, max_length: usize) -> AllocatedRange {
-        let free_range = self
-            .find_next_free_range(self.cursor.get())
-            .expect("Oh no, no more free blocks :(((");
+    pub fn allocate(&self, max_length: usize) -> Result<AllocatedRange> {
+        let free_range = self.find_next_free_range(self.cursor.get())?;
         let range_end = free_range.end.min(free_range.start + max_length as u32);
         self.cursor.set(range_end);
-        AllocatedRange(AllocatedClusterIdx(free_range.start)..AllocatedClusterIdx(range_end))
+        Ok(AllocatedRange(
+            AllocatedClusterIdx(free_range.start)..AllocatedClusterIdx(range_end),
+        ))
     }
 
+    /// PANICS: Panics if `idx` out of bounds. This is only possible if `idx` was not allocated by `self`.
     pub fn cluster(&'a self, idx: &AllocatedClusterIdx) -> &[u8] {
         let start_byte = self
             .cluster_start_byte(idx)
-            .expect("Attempted to access an allocated cluster that has been made invalid");
-        assert!(start_byte + self.cluster_size < self.fs_len);
+            .unwrap_or_else(|| panic!("Attempted to access invalid cluster {}", idx));
         // SAFETY: The data is valid and since `idx` is unique and we borrowed it, nobody else can mutate the data.
         unsafe { slice::from_raw_parts(self.fs_ptr.add(start_byte), self.cluster_size) }
     }
 
+    /// PANICS: Panics if `idx` out of bounds. This is only possible if `idx` was not allocated by `self`.
     pub fn cluster_mut(&self, idx: &mut AllocatedClusterIdx) -> &mut [u8] {
         let start_byte = self
             .cluster_start_byte(idx)
-            .expect("Attempted to access an allocated cluster that has been made invalid");
-        assert!(start_byte + self.cluster_size <= self.fs_len);
+            .unwrap_or_else(|| panic!("Attempted to access invalid cluster {}", idx));
         // SAFETY: The data is valid and since `idx` is unique and we borrowed it mutably, nobody else can access the
         // data.
         unsafe { slice::from_raw_parts_mut(self.fs_ptr.add(start_byte), self.cluster_size) }
@@ -213,19 +219,18 @@ impl<'a> Allocator<'a> {
         self.used_ranges.free_element_count(self.cursor.get(), self.max_cluster_idx())
     }
 
-    // TODO documentation
-    /// Returns the position in `self.partition_data` at which the cluster `idx` starts or None if
-    /// the cluster is not in `self.partition_data`.
+    /// Returns the offset from `self.fs_ptr` at which the cluster `idx` starts or None if the cluster is not covered by
+    /// `self`, i.e. if the offset is not in `0..=self.fs_len - self.cluster_size`.
     fn cluster_start_byte(&self, idx: &AllocatedClusterIdx) -> Option<usize> {
         idx.0
             .checked_sub(self.first_valid_index)
             .map(|relative_cluster_idx| self.cluster_size * relative_cluster_idx as usize)
+            .filter(|start_byte| start_byte + self.cluster_size <= self.fs_len)
     }
 
     /// Returns the next range at or after `self.cursor` that is not used, or Err if such a range does not exist.
     fn find_next_free_range(&self, cursor: u32) -> Result<Range<ClusterIdx>> {
-        let non_used_range = self.used_ranges.next_not_covered(cursor);
-        let non_used_range = match non_used_range {
+        let non_used_range = match self.used_ranges.next_not_covered(cursor) {
             NotCoveredRange::Bounded(range) => range,
             NotCoveredRange::Unbounded(start) => start..self.max_cluster_idx(),
         };
@@ -243,6 +248,8 @@ impl<'a> Allocator<'a> {
 }
 
 
+/// Allows to read clusters that were allocated by the `Allocator` instance that produced `self`, but not to allocate
+/// any clusters.
 // no first_valid_index because in our use case it's always 0
 pub struct AllocatedReader<'a> {
     fs_ptr: *const u8,
@@ -252,10 +259,24 @@ pub struct AllocatedReader<'a> {
 }
 
 impl<'a> AllocatedReader<'a> {
-    pub fn cluster(&self, idx: AllocatedClusterIdx) -> &'a [u8] {
-        let start_byte = self.cluster_size * usize::from(idx);
-        assert!(start_byte + self.cluster_size <= self.fs_len);
+    /// PANICS: Panics if `idx` out of bounds. This is only possible if `idx` was not allocated by the `Allocator` that
+    /// produced `self`.
+    pub fn cluster(&self, idx: &AllocatedClusterIdx) -> &'a [u8] {
+        let start_byte = self
+            .cluster_start_byte(idx)
+            .unwrap_or_else(|| panic!("Attempted to access invalid cluster {}", idx));
         // SAFETY: The data is valid and since `idx` is unique and we borrowed it, nobody can mutate the data.
         unsafe { slice::from_raw_parts(self.fs_ptr.add(start_byte), self.cluster_size) }
+    }
+
+    /// Returns the offset from `self.fs_ptr` at which the cluster `idx` starts or None if the cluster is not covered by
+    /// `self`, i.e. if the offset is not in `0..=self.fs_len - self.cluster_size`.
+    fn cluster_start_byte(&self, idx: &AllocatedClusterIdx) -> Option<usize> {
+        let start_byte = idx.0 as usize * self.cluster_size;
+        if start_byte + self.cluster_size <= self.fs_len {
+            Some(start_byte)
+        } else {
+            None
+        }
     }
 }

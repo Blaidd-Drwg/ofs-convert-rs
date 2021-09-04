@@ -2,6 +2,8 @@ use std::any::{Any, TypeId};
 use std::mem::size_of;
 use std::rc::Rc;
 
+use anyhow::Result;
+
 use crate::allocator::{AllocatedClusterIdx, AllocatedReader, Allocator};
 
 type Page = [u8];
@@ -41,42 +43,41 @@ impl<'a> StreamArchiver<'a> {
         }
     }
 
-    pub fn into_reader(mut self) -> (Reader<'a>, Allocator<'a>) {
-        self.write_page();
+    pub fn into_reader(mut self) -> Result<(Reader<'a>, Allocator<'a>)> {
+        self.write_page()?;
         let allocator = Rc::try_unwrap(self.allocator).expect(
             "StreamArchiver cannot take ownership of its allocator, somebody else still has a reference to it.",
         );
         let (allocated_reader, new_allocator) = allocator.split_into_reader();
         let head = self.head.or(self.previous_page_idx);
-        (Reader::new(head, self.page_size, allocated_reader), new_allocator)
+        Ok((Reader::new(head, self.page_size, allocated_reader), new_allocator))
     }
 
-    pub fn archive<T>(&mut self, objects: Vec<T>)
+    pub fn archive<T>(&mut self, objects: Vec<T>) -> Result<()>
     where T: Any {
         let header = Header { len: objects.len(), type_id: TypeId::of::<T>() };
-        // SAFETY: Safe assuming the archive is consistent so far.
         unsafe {
-            self.add_object(header);
-        }
-
-        for object in objects {
-            // SAFETY: Safe because we are adding `header.len` objects with type ID `header.type_id`.
-            unsafe {
-                self.add_object(object);
+            // SAFETY: Safe assuming the archive is consistent so far.
+            self.add_object(header)?;
+            for object in objects {
+                // SAFETY: Safe because we are adding `header.len` objects with type ID `header.type_id`.
+                self.add_object(object)?;
             }
         }
+        Ok(())
     }
 
-    fn previous_page_mut(&mut self) -> &mut Page {
-        self.allocator.cluster_mut(self.previous_page_idx.as_mut().unwrap())
+    fn previous_page_mut(&mut self) -> Option<&mut Page> {
+        Some(self.allocator.cluster_mut(self.previous_page_idx.as_mut()?))
     }
 
-    fn page_mut(&self, page_idx: &mut PageIdx) -> &mut Page {
-        self.allocator.cluster_mut(page_idx.as_mut().unwrap())
+    fn page_mut(&self, page_idx: &mut PageIdx) -> Option<&mut Page> {
+        Some(self.allocator.cluster_mut(page_idx.as_mut()?))
     }
 
-    fn allocate_page(&self) -> PageIdx {
-        Some(self.allocator.allocate_one())
+    /// Never returns `Ok(None)`
+    fn allocate_page(&self) -> Result<PageIdx> {
+        Ok(Some(self.allocator.allocate_one()?))
     }
 
     /// SAFETY: To avoid aliasing, the caller must ensure that the original and the clone are not used to access a
@@ -85,13 +86,12 @@ impl<'a> StreamArchiver<'a> {
         page_idx.as_ref().map(|idx| idx.clone())
     }
 
-    fn write_page(&mut self) {
-        let mut page_idx = self.allocate_page();
-        self.page_mut(&mut page_idx).copy_from_slice(&self.current_page);
+    fn write_page(&mut self) -> Result<()> {
+        let mut page_idx = self.allocate_page()?;
+        self.page_mut(&mut page_idx).unwrap().copy_from_slice(&self.current_page);
 
         // if the current page is not the head, write the current page's index into the previous page's next pointer
-        if self.previous_page_idx.is_some() {
-            let previous_page = self.previous_page_mut();
+        if let Some(previous_page) = self.previous_page_mut() {
             let ptr = previous_page.as_mut_ptr() as *mut PageIdx;
             unsafe {
                 // SAFETY: Safe because `page_idx_clone` is immediately written to a page, and since `page_idx` is not
@@ -115,6 +115,7 @@ impl<'a> StreamArchiver<'a> {
         unsafe {
             self.reset_page();
         }
+        Ok(())
     }
 
     /// SAFETY: By resetting the current page, this method may delete data needed to keep the archive consistent. The
@@ -132,15 +133,16 @@ impl<'a> StreamArchiver<'a> {
     /// SAFETY: Only safe if consistent with the preceding header. I.e. either:
     /// 1) The preceding header `h` is followed by `h.len` objects. Then `object must be of type `Header`; or
     /// 2) The preceding header `h` is followed by fewer than `h.len` objects. Then `T` must have the ID `h.type_id`.
-    unsafe fn add_object<T>(&mut self, object: T) {
+    unsafe fn add_object<T>(&mut self, object: T) -> Result<()> {
         if self.space_left_in_page() < size_of::<T>() {
-            self.write_page();
+            self.write_page()?;
         }
         assert!(self.space_left_in_page() >= size_of::<T>());
 
         let ptr = self.current_page.as_ptr().add(self.position_in_current_page);
         self.position_in_current_page += size_of::<T>();
         std::ptr::write_unaligned(ptr as *mut T, object);
+        Ok(())
     }
 
     fn space_left_in_page(&self) -> usize {
@@ -162,7 +164,7 @@ impl<'a> Reader<'a> {
     pub fn new(first_page_idx: PageIdx, page_size: usize, allocated_reader: AllocatedReader<'a>) -> Self {
         Self {
             current_page: allocated_reader
-                .cluster(first_page_idx.expect("Reader initialized with empty StreamArchiver")),
+                .cluster(&first_page_idx.expect("Reader initialized with empty StreamArchiver")),
             page_size,
             position_in_current_page: size_of::<PageIdx>(),
             current_header: Header { len: 0, type_id: TypeId::of::<()>() },
@@ -215,7 +217,7 @@ impl<'a> Reader<'a> {
         // SAFETY: Safe because every page begins with the next `PageIdx`.
         let next_page_idx = unsafe { std::ptr::read_unaligned(self.current_page.as_ptr() as *const PageIdx) };
         let next_page_idx = next_page_idx.expect("Attempted to read past StreamArchiver end");
-        self.current_page = self.allocator.cluster(next_page_idx);
+        self.current_page = self.allocator.cluster(&next_page_idx);
         self.position_in_current_page = size_of::<PageIdx>(); // skip next page index
     }
 }
