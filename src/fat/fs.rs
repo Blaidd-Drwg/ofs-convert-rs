@@ -32,9 +32,9 @@ impl<'a> FatFs<'a> {
     /// - this memory represents a consistent FAT filesystem;
     /// - no pointer to one of the sections used by the FAT filesystem (i.e. the boot sector, the FAT table(s), and any
     ///   cluster that is not marked as free in the FAT table) will be dereferenced during the lifetime 'a.
-    pub unsafe fn new(partition_ptr: *mut u8, partition_len: usize, _lifetime: PhantomData<&'a ()>) -> Self {
+    pub unsafe fn new(partition_ptr: *mut u8, partition_len: usize, _lifetime: PhantomData<&'a ()>) -> Result<Self> {
         assert!(size_of::<BootSector>() <= partition_len);
-        let boot_sector = &*(partition_ptr as *const BootSector);
+        let boot_sector = (&*(partition_ptr as *const BootSector)).validate()?;
 
         let fat_table_range = boot_sector.get_fat_table_range();
         assert!(fat_table_range.start > size_of::<BootSector>());
@@ -47,13 +47,13 @@ impl<'a> FatFs<'a> {
         assert!(data_range.start > fat_table_range.end);
         assert!(data_range.end <= partition_len);
 
-        Self {
+        Ok(Self {
             boot_sector,
             fat_table,
             data_ptr: partition_ptr.add(data_range.start),
             data_len: data_range.len(),
             _lifetime,
-        }
+        })
     }
 
     /// SAFETY: The caller must guarantee that:
@@ -65,13 +65,13 @@ impl<'a> FatFs<'a> {
         partition_ptr: *mut u8,
         partition_len: usize,
         lifetime: PhantomData<&'a ()>,
-    ) -> (Self, Allocator) {
+    ) -> Result<(Self, Allocator)> {
         // We want to borrow the filesystem's memory twice: immutably in `FatFs` and mutably in `Allocator`. To avoid
         // aliasing, we divide the filesystem into used clusters (i.e. the reserved clusters, the FAT clusters, and the
         // data clusters that contain data) and unused clusters (i.e. the data clusters that contain no data).
         // `FatFs` will only ever dereference pointers to used clusters. `Allocator` will only ever dereference
         // pointers to unused clusters.
-        let instance = Self::new(partition_ptr, partition_len, lifetime);
+        let instance = Self::new(partition_ptr, partition_len, lifetime)?;
         let allocator = Allocator::new(
             partition_ptr,
             instance.boot_sector.fs_size() as usize,
@@ -79,7 +79,7 @@ impl<'a> FatFs<'a> {
             instance.used_ranges(),
             lifetime,
         );
-        (instance, allocator)
+        Ok((instance, allocator))
     }
 
     pub fn into_ext4(self) -> Ext4Fs<'a> {
@@ -92,7 +92,6 @@ impl<'a> FatFs<'a> {
     }
 
     // TODO all the int type conversions (from, try_from)
-    // TODO error concept: return options of results? error chain?
 
     pub fn fat_table(&self) -> &'a [FatTableIndex] {
         self.fat_table

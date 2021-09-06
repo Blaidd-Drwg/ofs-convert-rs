@@ -1,7 +1,12 @@
 use std::convert::TryFrom;
 use std::ops::Range;
 
+use anyhow::{bail, Result};
+
 use crate::fat::{ClusterIdx, FatDentry};
+
+const FS_TYPE_FAT32: [u8; 8] = *b"FAT32   ";
+const EXT_BOOT_SIGNATURE_FAT32: u8 = 0x29;
 
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -32,10 +37,31 @@ pub struct BootSector {
     pub ext_boot_signature: u8,
     pub volume_id: u32,
     pub volume_label: [u8; 11],
-    pub fs_type: u64,
+    pub fs_type: [u8; 8],
 }
 
 impl BootSector {
+    /// Performs a sanity check to see if this is indeed a FAT32 boot sector. A return value of `true` does not
+    /// guarantee that `self` is consistent with the partition it belongs to, only that this data was meant to be a boot
+    /// sector.
+    pub fn validate(&self) -> Result<&Self> {
+        if self.ext_boot_signature != EXT_BOOT_SIGNATURE_FAT32 {
+            bail!(
+                "Unexpected extended boot signature: {} instead of {}",
+                self.ext_boot_signature,
+                EXT_BOOT_SIGNATURE_FAT32
+            );
+        }
+        if self.fs_type != FS_TYPE_FAT32 {
+            bail!(
+                "Unexpected file system type: {} instead of {}",
+                std::str::from_utf8(&self.fs_type).unwrap_or("(non-printable)"),
+                std::str::from_utf8(&FS_TYPE_FAT32).unwrap_or("(non-printable)")
+            );
+        }
+        Ok(self)
+    }
+
     /// Returns the range in bytes of the first FAT table, relative to the filesystem start
     pub fn get_fat_table_range(&self) -> Range<usize> {
         let fat_table_start_byte = usize::from(self.sectors_before_fat) * usize::from(self.bytes_per_sector);

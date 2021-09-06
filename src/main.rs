@@ -52,7 +52,7 @@ fn print_help() {
 unsafe fn ofs_convert(partition_path: &str) -> Result<()> {
     let mut partition = Partition::open(partition_path)?;
     let (fat_fs, mut allocator) =
-        FatFs::new_with_allocator(partition.as_mut_ptr(), partition.len(), partition.lifetime);
+        FatFs::new_with_allocator(partition.as_mut_ptr(), partition.len(), partition.lifetime)?;
     let boot_sector = fat_fs.boot_sector();
     let forbidden_ranges = SuperBlock::from(boot_sector)?.block_group_overhead_ranges();
     for range in &forbidden_ranges {
