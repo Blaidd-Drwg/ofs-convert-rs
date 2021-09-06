@@ -13,7 +13,7 @@ mod util;
 use std::env::args;
 use std::mem::size_of;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use static_assertions::const_assert;
 
 use crate::ext4::SuperBlock;
@@ -23,10 +23,7 @@ use crate::serialization::FatTreeSerializer;
 
 const_assert!(size_of::<usize>() >= size_of::<u32>());
 
-// TODO assertion fails with mkfs -C -F 32 -s 2 -S 512 150
-// TODO also -C -F 32 -s 2 -S 512 2001
-// TODO fsck
-fn main() {
+fn main() -> Result<()> {
     if args().len() != 2 {
         print_help();
         std::process::exit(1);
@@ -34,14 +31,9 @@ fn main() {
 
     match args().nth(1).unwrap().as_str() {
         "-h" | "--help" => print_help(),
-        partition_path => {
-            let result = unsafe { ofs_convert(partition_path) };
-            if let Err(reason) = result {
-                eprintln!("Error: {}", reason);
-                std::process::exit(1);
-            }
-        }
+        partition_path => unsafe { ofs_convert(partition_path)? },
     }
+    Ok(())
 }
 
 fn print_help() {
@@ -60,12 +52,13 @@ unsafe fn ofs_convert(partition_path: &str) -> Result<()> {
     }
 
     let mut serializer = FatTreeSerializer::new(allocator, fat_fs, forbidden_ranges);
-    serializer.serialize_directory_tree()?;
+    serializer.serialize_directory_tree().context("Serialization failed")?;
+    // TODO differentiate FAT consistent/inconsistent errors
 
-    let mut deserializer = serializer.into_deserializer().expect("Dry run failed"); // TODO error management
+    let mut deserializer = serializer.into_deserializer().context("A dry run of the conversion failed")?;
 
     // This step makes the FAT filesystem inconsistent
-    deserializer.deserialize_directory_tree()?;
+    deserializer.deserialize_directory_tree().context("Conversion failed")?;
 
     Ok(())
 }

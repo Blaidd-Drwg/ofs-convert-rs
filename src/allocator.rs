@@ -182,6 +182,7 @@ impl<'a> Allocator<'a> {
         (reader, allocator)
     }
 
+    /// Returns a cluster that may be exclusively used by the caller.
     pub fn allocate_one(&self) -> Result<AllocatedClusterIdx> {
         Ok(Range::from(self.allocate(1)?).start)
     }
