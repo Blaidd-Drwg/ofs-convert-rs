@@ -1,3 +1,4 @@
+use std::convert::TryInto;
 use std::fs::{File, OpenOptions};
 use std::marker::PhantomData;
 use std::os::unix::fs::FileTypeExt;
@@ -5,7 +6,7 @@ use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::process::Command;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use fs2::FileExt;
 use memmap::{MmapMut, MmapOptions};
 use nix::ioctl_read;
@@ -44,13 +45,16 @@ impl<'a> Partition<'a> {
     fn get_file_size(file: &File) -> Result<usize> {
         let metadata = file.metadata()?;
         let filetype = metadata.file_type();
-        if filetype.is_file() {
-            return Ok(metadata.len() as usize);
+        let len = if filetype.is_file() {
+            metadata.len()
         } else if filetype.is_block_device() {
-            return Ok(Self::get_block_device_size as usize);
-        }
+            Self::get_block_device_size(file)?
+        } else {
+            bail!("Expected path to a file or a block device")
+        };
 
-        bail!("Expected path to a file or a block device")
+        len.try_into()
+            .with_context(|| format!("File size {} does not fit into a usize", len))
     }
 
     // error_chain?
@@ -64,11 +68,14 @@ impl<'a> Partition<'a> {
 
 
     // declared in linux/fs.h
+    // The type is declared as size_t due to a bug that cannot be fixed due to backwards compatibility. If I understand
+    // correctly, passing u64 instead of usize should work even on 32bit systems, I haven't had a chance to test it
+    // though. cfr. https://lists.debian.org/debian-glibc/2005/12/msg00069.html
     #[cfg(target_os = "linux")]
-    ioctl_read!(block_device_size, 0x12, 114, usize);
+    ioctl_read!(block_device_size, 0x12, 114, u64);
 
     #[cfg(target_os = "linux")]
-    fn get_block_device_size(file: &File) -> Result<usize> {
+    fn get_block_device_size(file: &File) -> Result<u64> {
         debug_assert!(file.metadata().unwrap().file_type().is_block_device());
         let mut size = 0;
         // SAFETY: the nix crate provides no safety documentation, so we must just assume that this is safe.
@@ -79,6 +86,7 @@ impl<'a> Partition<'a> {
     }
 }
 
+// TODO test block device
 #[cfg(test)]
 mod tests {
     use std::io::Write;
