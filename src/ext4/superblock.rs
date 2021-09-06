@@ -21,6 +21,7 @@ const ERRORS_DEFAULT: u16 = 1;
 const FEATURE_COMPAT_SPARSE_SUPER2: u32 = 512;
 const FEATURE_INCOMPAT_EXTENTS: u32 = 64;
 const FEATURE_INCOMPAT_64BIT: u32 = 128;
+const FEATURE_RO_COMPAT_LARGE_FILES: u32 = 2;
 const INODE_RATIO: u32 = 16384;
 const INODE_SIZE: u16 = 256;
 const VOLUME_NAME_LEN: usize = 16;
@@ -69,8 +70,11 @@ pub struct SuperBlock {
     /// >= size_of::<InodeInner>()
     pub s_inode_size: u16,
     pub s_block_group_nr: u16,
+    /// activated features that don't impact compatibility
     pub s_feature_compat: u32,
+    /// activated features that impact compatibility
     pub s_feature_incompat: u32,
+    /// activated features that only impact write compatibility
     pub s_feature_ro_compat: u32,
     pub s_uuid: [u8; 16],
     pub s_volume_name: [u8; VOLUME_NAME_LEN],
@@ -169,10 +173,12 @@ impl SuperBlock {
         sb.s_first_data_block = if block_size <= FIRST_BLOCK_PADDING { 1 } else { 0 };
         sb.s_blocks_per_group = MAX_BLOCKS_PER_GROUP.min(block_size as u32 * 8);
 
+        // TODO big dirs, prevent too deep extent trees
         sb.s_magic = SUPERBLOCK_MAGIC;
         sb.s_state = STATE_CLEANLY_UNMOUNTED;
         sb.s_feature_compat = FEATURE_COMPAT_SPARSE_SUPER2;
         sb.s_feature_incompat = FEATURE_INCOMPAT_64BIT | FEATURE_INCOMPAT_EXTENTS;
+        sb.s_feature_ro_compat = FEATURE_RO_COMPAT_LARGE_FILES;
         sb.s_desc_size = DESC_SIZE_64BIT;
         sb.s_inode_size = INODE_SIZE;
         sb.s_rev_level = NEWEST_REVISION;
