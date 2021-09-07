@@ -89,13 +89,13 @@ impl<'a> Ext4TreeDeserializerInternals<'a> {
     ) -> Result<Inode<'a>> {
         let mut inode = self.ext_fs.allocate_inode(dentry.is_dir());
         inode.init_from_dentry(dentry);
-        parent_dentry_writer.add_dentry(Ext4Dentry::new(inode.inode_no, name), &mut self.ext_fs)?;
+        parent_dentry_writer.add_dentry(Ext4Dentry::new(inode.inode_no, name)?, &mut self.ext_fs)?;
         Ok(inode)
     }
 
     fn build_lost_found(&mut self, root_dentry_writer: &mut DentryWriter) -> Result<()> {
         let inode = self.ext_fs.build_lost_found_inode();
-        let dentry = Ext4Dentry::new(inode.inode_no, "lost+found".to_string());
+        let dentry = Ext4Dentry::new(inode.inode_no, "lost+found".to_string())?;
 
         root_dentry_writer.add_dentry(dentry, &mut self.ext_fs)?;
         let mut dentry_writer = DentryWriter::new(inode, Rc::clone(&self.allocator), &mut self.ext_fs)?;
@@ -104,11 +104,11 @@ impl<'a> Ext4TreeDeserializerInternals<'a> {
     }
 
     fn build_dot_dirs(&mut self, parent_inode: &mut Inode, dentry_writer: &mut DentryWriter) -> Result<()> {
-        let dot_dentry = Ext4Dentry::new(dentry_writer.inode.inode_no, ".".to_string());
+        let dot_dentry = Ext4Dentry::new(dentry_writer.inode.inode_no, ".".to_string())?;
         dentry_writer.add_dentry(dot_dentry, &mut self.ext_fs)?;
         dentry_writer.inode.increment_link_count();
 
-        let dot_dot_dentry = Ext4Dentry::new(parent_inode.inode_no, "..".to_string());
+        let dot_dot_dentry = Ext4Dentry::new(parent_inode.inode_no, "..".to_string())?;
         dentry_writer.add_dentry(dot_dot_dentry, &mut self.ext_fs)?;
         parent_inode.increment_link_count();
         Ok(())
@@ -116,11 +116,11 @@ impl<'a> Ext4TreeDeserializerInternals<'a> {
 
     // same as `build_dot_dirs` except `parent_inode` would alias `dentry_writer.inode`
     fn build_root_dot_dirs(&mut self, dentry_writer: &mut DentryWriter) -> Result<()> {
-        let dot_dentry = Ext4Dentry::new(dentry_writer.inode.inode_no, ".".to_string());
+        let dot_dentry = Ext4Dentry::new(dentry_writer.inode.inode_no, ".".to_string())?;
         dentry_writer.add_dentry(dot_dentry, &mut self.ext_fs)?;
         dentry_writer.inode.increment_link_count();
 
-        let dot_dot_dentry = Ext4Dentry::new(dentry_writer.inode.inode_no, "..".to_string());
+        let dot_dot_dentry = Ext4Dentry::new(dentry_writer.inode.inode_no, "..".to_string())?;
         dentry_writer.add_dentry(dot_dot_dentry, &mut self.ext_fs)?;
         dentry_writer.inode.increment_link_count();
         Ok(())

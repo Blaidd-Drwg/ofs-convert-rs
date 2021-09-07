@@ -1,3 +1,4 @@
+use anyhow::{bail, Result};
 use num::Integer;
 
 const EXT4_NAME_MAX_LEN: usize = 255;
@@ -17,10 +18,14 @@ pub struct Ext4DentrySized {
 }
 
 impl Ext4Dentry {
-    pub fn new(inode_no: u32, name: String) -> Self {
+    pub fn new(inode_no: u32, name: String) -> Result<Self> {
+        // FAT32 allows names up to 255 UCS-2 characters, which may be longer than 255 bytes
+        if name.len() > EXT4_NAME_MAX_LEN {
+            bail!("Length of file name '{}' exceeds 255 bytes", name);
+        }
         let dentry_len = next_multiple_of_four(name.len() + 8) as u16;
         let inner = Ext4DentrySized { inode_no, dentry_len, name_len: name.len() as u16 };
-        Self { inner, name }
+        Ok(Self { inner, name })
     }
 
     pub fn serialize_name(&self) -> Vec<u8> {

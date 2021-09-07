@@ -87,7 +87,7 @@ impl<'a> DeserializerInternals<'a> for DryRunDeserializerInternals<'a> {
         name: String,
         parent_directory_writer: &mut DryRunDirectoryWriter,
     ) -> Result<DryRunDirectoryWriter> {
-        self.build_file(name, parent_directory_writer);
+        self.build_file(name, parent_directory_writer)?;
         Ok(DryRunDirectoryWriter::new(self.block_size))
     }
 
@@ -98,7 +98,7 @@ impl<'a> DeserializerInternals<'a> for DryRunDeserializerInternals<'a> {
         extents: Vec<Range<ClusterIdx>>,
         parent_directory_writer: &mut DryRunDirectoryWriter,
     ) -> Result<()> {
-        self.build_file(name, parent_directory_writer);
+        self.build_file(name, parent_directory_writer)?;
         self.used_blocks += ExtentTree::required_block_count(extents.len(), self.block_size);
         Ok(())
     }
@@ -106,9 +106,10 @@ impl<'a> DeserializerInternals<'a> for DryRunDeserializerInternals<'a> {
 
 // TODO test `required_block_count`
 impl<'a> DryRunDeserializerInternals<'a> {
-    fn build_file(&mut self, name: String, parent_directory_writer: &mut DryRunDirectoryWriter) {
+    fn build_file(&mut self, name: String, parent_directory_writer: &mut DryRunDirectoryWriter) -> Result<()> {
         self.used_inodes += 1;
-        self.used_blocks += parent_directory_writer.add_dentry(&Ext4Dentry::new(0, name));
+        self.used_blocks += parent_directory_writer.add_dentry(&Ext4Dentry::new(0, name)?);
+        Ok(())
     }
 }
 
