@@ -11,6 +11,12 @@ use crate::serialization::{Deserializer, DeserializerInternals, DirectoryWriter,
 
 pub type DryRunDeserializer<'a> = Deserializer<'a, DryRunDeserializerInternals<'a>>;
 
+/// A mock version of `Ext4TreeDeserializer` which triggers all cases in which the actual deserializer would bail
+/// mid-conversion, leaving the file system inconsistent. Running `DryRunDeserializer` does not mutate the partition.
+/// The errors that will be caught are:
+/// - File name too long
+/// - Insufficient free space in file system
+/// - Insufficient free inodes in the new ext4 file system
 impl<'a> DryRunDeserializer<'a> {
     pub fn dry_run(reader: Reader<'a>, free_inodes: usize, free_blocks: usize, block_size: usize) -> Result<()> {
         let mut instance = Self {
