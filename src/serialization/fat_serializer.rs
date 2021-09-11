@@ -7,7 +7,7 @@ use anyhow::Result;
 use chrono::prelude::*;
 
 use crate::allocator::Allocator;
-use crate::fat::{ClusterIdx, FatDentry, FatFile, FatFs, ROOT_FAT_IDX};
+use crate::fat::{ClusterIdx, FatDentry, FatFile, FatFs, FatTableIndex, ROOT_FAT_IDX};
 use crate::ranges::Ranges;
 use crate::serialization::{Ext4TreeDeserializer, FileType, StreamArchiver};
 
@@ -79,17 +79,8 @@ impl<'a> FatTreeSerializer<'a> {
         // SAFETY: safe because `ROOT_FAT_IDX` belongs to the root directory
         let root_child_count = unsafe { self.fat_fs.dir_content_iter(ROOT_FAT_IDX).count() };
         self.archive_root_child_count(root_child_count.try_into().unwrap())?;
-
         // SAFETY: safe because `ROOT_FAT_IDX` belongs to the root directory
-        for mut file in unsafe { self.fat_fs.dir_content_iter(ROOT_FAT_IDX) } {
-            if file.dentry.is_dir() {
-                self.serialize_directory(file)?;
-            } else {
-                self.copy_data_to_unforbidden(&mut file)?;
-                self.archive_file(file)?;
-            }
-        }
-        Ok(())
+        unsafe { self.serialize_directory_content(ROOT_FAT_IDX) }
     }
 
     fn serialize_directory(&self, file: FatFile) -> Result<()> {
@@ -98,14 +89,22 @@ impl<'a> FatTreeSerializer<'a> {
         // SAFETY: safe because `first_fat_index` belongs to a directory
         let child_count = unsafe { self.fat_fs.dir_content_iter(first_fat_idx).count() };
         self.archive_directory(file, child_count.try_into().unwrap())?;
-
         // SAFETY: safe because `first_fat_index` belongs to a directory
-        for mut file in unsafe { self.fat_fs.dir_content_iter(first_fat_idx) } {
+        unsafe {
+            self.serialize_directory_content(first_fat_idx)?;
+        }
+        Ok(())
+    }
+
+    /// SAFETY: safe if `first_fat_idx` points to a cluster belonging to a directory
+    unsafe fn serialize_directory_content(&self, first_fat_idx: FatTableIndex) -> Result<()> {
+        // SAFETY: safe because `first_fat_index` belongs to a directory
+        for mut file in self.fat_fs.dir_content_iter(first_fat_idx) {
             if file.dentry.is_dir() {
                 self.serialize_directory(file)?;
             } else {
-                self.copy_data_to_unforbidden(&mut file)?;
-                self.archive_file(file)?;
+                self.copy_file_data_to_unforbidden(&mut file)?;
+                self.archive_regular_file(file)?;
             }
         }
         Ok(())
@@ -117,7 +116,7 @@ impl<'a> FatTreeSerializer<'a> {
         Ok(())
     }
 
-    fn archive_file(&self, file: FatFile) -> Result<()> {
+    fn archive_regular_file(&self, file: FatFile) -> Result<()> {
         let mut archiver = self.stream_archiver.borrow_mut();
         archiver.archive(vec![FileType::RegularFile])?;
         archiver.archive(vec![file.dentry])?;
@@ -134,7 +133,7 @@ impl<'a> FatTreeSerializer<'a> {
         Ok(())
     }
 
-    fn copy_data_to_unforbidden(&self, file: &mut FatFile) -> Result<()> {
+    fn copy_file_data_to_unforbidden(&self, file: &mut FatFile) -> Result<()> {
         let old_ranges = std::mem::take(&mut file.data_ranges);
         for range in old_ranges {
             for (range_fragment, forbidden) in self.forbidden_ranges.split_overlapping(range) {
