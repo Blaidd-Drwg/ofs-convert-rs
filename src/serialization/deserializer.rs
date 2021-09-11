@@ -53,7 +53,8 @@ pub trait DeserializerInternals<'a> {
     fn deserialize_file(&mut self, parent_directory_writer: &mut Self::D) -> Result<()> {
         let file_type = self.read_next::<FileType>()[0];
         let dentry = self.read_next::<FatDentry>()[0];
-        let name = String::from_utf8(self.read_next::<u8>()).unwrap();
+        let name = String::from_utf8(self.read_next::<u8>())
+            .expect("File name is no longer a valid String after deserialization");
 
         match file_type {
             FileType::Directory(child_count) => {

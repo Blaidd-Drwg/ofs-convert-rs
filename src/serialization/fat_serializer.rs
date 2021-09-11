@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::convert::{TryFrom, TryInto};
+use std::iter::Step;
 use std::ops::Range;
 use std::rc::Rc;
 
@@ -7,7 +8,7 @@ use anyhow::Result;
 use chrono::prelude::*;
 
 use crate::allocator::Allocator;
-use crate::fat::{ClusterIdx, FatDentry, FatFile, FatFs, FatTableIndex, ROOT_FAT_IDX};
+use crate::fat::{ClusterIdx, DataClusterIdx, FatDentry, FatFile, FatFs, FatTableIndex, ROOT_FAT_IDX};
 use crate::ranges::Ranges;
 use crate::serialization::{Ext4TreeDeserializer, FileType, StreamArchiver};
 
@@ -138,7 +139,9 @@ impl<'a> FatTreeSerializer<'a> {
         for range in old_ranges {
             for (range_fragment, forbidden) in self.forbidden_ranges.split_overlapping(range) {
                 if forbidden {
-                    let mut copied_ranges = self.copy_range_to_unforbidden(range_fragment)?;
+                    let data_cluster_fragment = self.fat_fs.data_cluster_from_cluster(range_fragment.start)?
+                        ..self.fat_fs.data_cluster_from_cluster(range_fragment.end)?;
+                    let mut copied_ranges = self.copy_range_to_unforbidden(data_cluster_fragment)?;
                     file.data_ranges.append(&mut copied_ranges);
                 } else {
                     file.data_ranges.push(range_fragment);
@@ -148,17 +151,20 @@ impl<'a> FatTreeSerializer<'a> {
         Ok(())
     }
 
-    fn copy_range_to_unforbidden(&self, mut range: Range<ClusterIdx>) -> Result<Vec<Range<ClusterIdx>>> {
+    fn copy_range_to_unforbidden(&self, mut range: Range<DataClusterIdx>) -> Result<Vec<Range<ClusterIdx>>> {
         let mut copied_fragments = Vec::new();
         while !range.is_empty() {
-            let mut allocated = self.allocator.allocate(range.len())?;
+            let range_len = DataClusterIdx::steps_between(&range.start, &range.end).expect(
+                "Unreachable: `range` is not empty, so `range_len` is positive, and `usize` is at least as wide as \
+                 `DataClusterIdx.0`, so no overflow",
+            );
+            let mut allocated = self.allocator.allocate(range_len)?;
             let allocated_len = allocated.len();
-            for (old_cluster_idx, mut new_cluster_idx) in range.clone().zip(allocated.iter_mut()) {
-                let old_data_cluster_idx = self.fat_fs.cluster_idx_to_data_cluster_idx(old_cluster_idx).unwrap();
+            for (old_data_cluster_idx, mut new_cluster_idx) in range.clone().zip(allocated.iter_mut()) {
                 let old_cluster = self.fat_fs.data_cluster(old_data_cluster_idx);
                 self.allocator.cluster_mut(&mut new_cluster_idx).copy_from_slice(old_cluster);
             }
-            range.start += allocated_len as u32;
+            range.start = DataClusterIdx::forward(range.start, allocated_len);
             copied_fragments.push(allocated.into());
         }
         Ok(copied_fragments)

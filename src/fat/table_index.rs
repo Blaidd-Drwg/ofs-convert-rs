@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::iter::Step;
 use std::ops::{Add, AddAssign, Index};
 
 use crate::fat::{BootSector, ClusterIdx, ROOT_FAT_IDX};
@@ -104,5 +105,21 @@ impl From<DataClusterIdx> for u32 {
 impl From<DataClusterIdx> for usize {
     fn from(idx: DataClusterIdx) -> Self {
         idx.0 as Self
+    }
+}
+
+impl Step for DataClusterIdx {
+    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
+        end.0.checked_sub(start.0).map(|steps| usize::try_from(steps).ok())?
+    }
+
+    fn forward_checked(start: Self, count: usize) -> Option<Self> {
+        let count = u32::try_from(count).ok()?;
+        Some(DataClusterIdx(start.0.checked_add(count)?))
+    }
+
+    fn backward_checked(start: Self, count: usize) -> Option<Self> {
+        let count = u32::try_from(count).ok()?;
+        Some(DataClusterIdx(start.0.checked_sub(count)?))
     }
 }

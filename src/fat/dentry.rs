@@ -11,7 +11,7 @@ pub union FatPseudoDentry {
 impl FatPseudoDentry {
     pub fn as_dentry(&self) -> Option<&FatDentry> {
         // SAFETY: this is safe, since we only access the union if the check succeeds
-        unsafe { (!self.is_long_file_name()).then(|| &self.dentry) }
+        unsafe { self.is_dentry().then(|| &self.dentry) }
     }
 
     pub fn as_long_file_name(&self) -> Option<&LongFileName> {
@@ -19,10 +19,14 @@ impl FatPseudoDentry {
         unsafe { self.is_long_file_name().then(|| &self.long_file_name) }
     }
 
-    pub fn is_long_file_name(&self) -> bool {
+    pub fn is_dentry(&self) -> bool {
         // SAFETY: attrs field is in the same position for both FatDentry and LongFileName,
         // so this is safe
-        unsafe { self.long_file_name.attrs & 0x0F != 0 }
+        unsafe { self.long_file_name.attrs & 0x0F == 0 }
+    }
+
+    pub fn is_long_file_name(&self) -> bool {
+        !self.is_dentry()
     }
 
     /// True iff self is invalid but the directory might contain more valid dentries
@@ -96,14 +100,18 @@ impl FatDentry {
 
     pub fn read_short_file_name(&self) -> String {
         let name_ascii_bytes: Vec<_> = self.short_name.iter().copied().collect();
-        let mut name_string = String::from_utf8(name_ascii_bytes).unwrap().trim_end().to_string();
+        let mut name_string = String::from_utf8(name_ascii_bytes)
+            .expect("FAT dentry has name containing non-ASCII characters")
+            .trim_end()
+            .to_string();
         if self.has_lowercase_name() {
             name_string.make_ascii_lowercase();
         }
 
         if self.has_file_extension() {
             let extension_ascii_bytes: Vec<_> = self.short_extension.iter().copied().collect();
-            let mut extension_string = String::from_utf8(extension_ascii_bytes).unwrap();
+            let mut extension_string = String::from_utf8(extension_ascii_bytes)
+                .expect("FAT dentry has extensions containing non-ASCII characters");
             if self.has_lowercase_extension() {
                 extension_string.make_ascii_lowercase();
             }
@@ -150,7 +158,9 @@ impl LongFileName {
 
     // TODO handle Errors
     pub fn to_utf8_string(self) -> String {
-        std::char::decode_utf16(self.to_utf16_string()).map(Result::unwrap).collect()
+        std::char::decode_utf16(self.to_utf16_string())
+            .map(|c| c.expect("FAT long file name entry contains non-UTF16 character"))
+            .collect()
     }
 
     // By the standard, long file names are encoded in UCS-2. However, the Linux implementation

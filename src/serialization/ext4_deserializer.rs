@@ -25,7 +25,7 @@ impl<'a> Ext4TreeDeserializer<'a> {
         let free_inodes = SuperBlock::from(fat_fs.boot_sector())?.free_inode_count();
         let free_blocks = allocator.free_block_count();
         DryRunDeserializer::dry_run(reader.clone(), free_inodes, free_blocks, fat_fs.cluster_size())?;
-        Ok(Self::new(reader, allocator, fat_fs.into_ext4()))
+        Ok(Self::new(reader, allocator, fat_fs.into_ext4()?))
     }
 }
 

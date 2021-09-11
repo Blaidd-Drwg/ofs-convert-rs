@@ -82,7 +82,7 @@ impl<'a> FatFs<'a> {
         Ok((instance, allocator))
     }
 
-    pub fn into_ext4(self) -> Ext4Fs<'a> {
+    pub fn into_ext4(self) -> Result<Ext4Fs<'a>> {
         let start_ptr = self.boot_sector as *const _ as *mut u8;
         unsafe { Ext4Fs::from(start_ptr, self.boot_sector) }
     }
@@ -106,7 +106,7 @@ impl<'a> FatFs<'a> {
     }
 
     // TODO these conversions are a mess
-    pub fn cluster_idx_to_data_cluster_idx(&self, cluster_idx: ClusterIdx) -> Result<DataClusterIdx> {
+    pub fn data_cluster_from_cluster(&self, cluster_idx: ClusterIdx) -> Result<DataClusterIdx> {
         let data_cluster_idx = cluster_idx.checked_sub(self.boot_sector.first_data_cluster());
         match data_cluster_idx {
             Some(data_cluster_idx) => Ok(DataClusterIdx::new(data_cluster_idx)),

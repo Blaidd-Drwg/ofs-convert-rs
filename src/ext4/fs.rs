@@ -20,8 +20,8 @@ impl<'a> Ext4Fs<'a> {
     /// SAFETY: Safe if `partition_ptr` is valid for reads for `boot_sector.partition_len()` many bytes, and no memory
     /// belonging to a blocks in `superblock.block_group_overhead_ranges()` is dereferenced for the duration of the
     /// lifetime `'a`.
-    pub unsafe fn from(partition_ptr: *mut u8, boot_sector: &BootSector) -> Self {
-        let superblock = SuperBlock::from(boot_sector).unwrap();
+    pub unsafe fn from(partition_ptr: *mut u8, boot_sector: &BootSector) -> Result<Self> {
+        let superblock = SuperBlock::from(boot_sector)?;
         let mut block_groups = Vec::new();
         let mut block_group_descriptors = Vec::new();
 
@@ -32,28 +32,40 @@ impl<'a> Ext4Fs<'a> {
             block_groups.push(BlockGroup::new(partition_ptr, info));
         }
 
-        *block_groups[0].superblock.as_deref_mut().unwrap() = superblock;
+        *block_groups[0]
+            .superblock
+            .as_deref_mut()
+            .expect("First ext4 block group has no superblock") = superblock;
         block_groups[0]
             .gdt
             .as_deref_mut()
-            .unwrap()
+            .expect("First ext4 block group has no GDT")
             .copy_from_slice(&block_group_descriptors);
-        Self {
+        Ok(Self {
             block_groups,
             next_free_inode_no: FIRST_NON_RESERVED_INODE,
-        }
+        })
     }
 
     pub fn superblock(&self) -> &SuperBlock {
-        self.block_groups[0].superblock.as_deref().unwrap()
+        self.block_groups[0]
+            .superblock
+            .as_deref()
+            .expect("First ext4 block group has no superblock")
     }
 
     pub fn superblock_mut(&mut self) -> &mut SuperBlock {
-        self.block_groups[0].superblock.as_deref_mut().unwrap()
+        self.block_groups[0]
+            .superblock
+            .as_deref_mut()
+            .expect("First ext4 block group has no superblock")
     }
 
     pub fn group_descriptor_table_mut(&mut self) -> &mut [Ext4GroupDescriptor] {
-        self.block_groups[0].gdt.as_deref_mut().unwrap()
+        self.block_groups[0]
+            .gdt
+            .as_deref_mut()
+            .expect("First ext4 block group has no GDT")
     }
 
     /// Assumes that `inode` currently has no extents.
@@ -176,8 +188,15 @@ impl Drop for Ext4Fs<'_> {
         let gdt = self.group_descriptor_table_mut().to_vec();
         for backup_group_idx in superblock.s_backup_bgs {
             let block_group = &mut self.block_groups[backup_group_idx as usize];
-            (*block_group.superblock.as_deref_mut().unwrap()) = superblock;
-            block_group.gdt.as_deref_mut().unwrap().copy_from_slice(&gdt);
+            (*block_group
+                .superblock
+                .as_deref_mut()
+                .expect("ext4 backup block group has no superblock")) = superblock;
+            block_group
+                .gdt
+                .as_deref_mut()
+                .expect("ext4 backup block group has no GDT")
+                .copy_from_slice(&gdt);
         }
     }
 }

@@ -261,14 +261,18 @@ impl<'a> ExtentTreeLevel<'a> {
         &mut self.all_entries[..self.header.valid_entry_count as usize]
     }
 
+    /// PANICS: Panics if `self` is a leaf level.
     fn last_child_level<'b>(&'b mut self, allocator: &'b Allocator<'b>) -> ExtentTreeLevel<'b> {
-        assert!(!self.header.is_leaf());
+        assert!(
+            !self.header.is_leaf(),
+            "Attempted to access the child of a leaf level in the extent tree"
+        );
         // SAFETY: Safe because if `self` is not a leaf level, all of its entries are `ExtentIdx`s, and we access one
         // that is valid.
         unsafe {
             self.valid_entries_mut()
                 .last_mut()
-                .unwrap() // we are not a leaf, so we have at least one child
+                .expect("Non-leaf extent tree level has no children")
                 .idx
                 .level_mut(allocator)
         }

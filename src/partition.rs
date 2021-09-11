@@ -74,9 +74,10 @@ impl<'a> Partition<'a> {
     #[cfg(target_os = "linux")]
     ioctl_read!(block_device_size, 0x12, 114, u64);
 
+    /// PANICS: Panics if `file` is not a block device.
     #[cfg(target_os = "linux")]
     fn get_block_device_size(file: &File) -> Result<u64> {
-        debug_assert!(file.metadata().unwrap().file_type().is_block_device());
+        assert!(file.metadata()?.file_type().is_block_device());
         let mut size = 0;
         // SAFETY: the nix crate provides no safety documentation, so we must just assume that this is safe.
         unsafe {

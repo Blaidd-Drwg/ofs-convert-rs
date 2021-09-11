@@ -38,13 +38,16 @@ where I: Iterator<Item = &'a FatPseudoDentry>
     fn next(&mut self) -> Option<Self::Item> {
         let file_name;
         let dentry;
-        if self.pseudo_dentry_iter.peek()?.is_long_file_name() {
-            let res = self.read_long_file_name();
-            file_name = res.0;
-            dentry = self.pseudo_dentry_iter.next()?.as_dentry().unwrap();
-        } else {
+        if self.pseudo_dentry_iter.peek()?.is_dentry() {
             dentry = self.pseudo_dentry_iter.next().unwrap().as_dentry().unwrap();
             file_name = dentry.read_short_file_name();
+        } else {
+            file_name = self.read_long_file_name();
+            dentry = self
+                .pseudo_dentry_iter
+                .next()?
+                .as_dentry()
+                .expect("FAT long file name not followed by a dentry");
         }
 
         let file = FatFile {
@@ -56,11 +59,11 @@ where I: Iterator<Item = &'a FatPseudoDentry>
     }
 }
 
-/// Caller must ensure that `self.pseudo_dentry_iter.next()` is a `LongFileName`
 impl<'a, I> FatFileIter<'a, I>
 where I: Iterator<Item = &'a FatPseudoDentry>
 {
-    fn read_long_file_name(&mut self) -> (String, Vec<Vec<u16>>) {
+    /// PANICS: Panics if `self.pseudo_dentry_iter.next()` is not a `LongFileName`
+    fn read_long_file_name(&mut self) -> String {
         let first_entry = self.pseudo_dentry_iter.next().unwrap().as_long_file_name().unwrap();
         let mut file_name_components = vec![first_entry.to_utf8_string()];
 
@@ -76,9 +79,7 @@ where I: Iterator<Item = &'a FatPseudoDentry>
             file_name_components.push(long_file_name.to_utf8_string());
             lfn_entries.push(long_file_name.to_utf16_string());
         }
-        // join(file_name_components.into_iter().rev(), "")
-        // join(file_name_components.iter().rev(), "")
-        (join(file_name_components.iter().rev(), ""), lfn_entries)
+        join(file_name_components.into_iter().rev(), "")
     }
 }
 
