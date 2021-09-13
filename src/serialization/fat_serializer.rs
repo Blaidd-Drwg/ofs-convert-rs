@@ -4,7 +4,7 @@ use std::iter::Step;
 use std::ops::Range;
 use std::rc::Rc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::prelude::*;
 
 use crate::allocator::Allocator;
@@ -36,16 +36,16 @@ struct DentryRepresentation {
 }
 
 impl DentryRepresentation {
-    pub fn from(dentry: &FatDentry) -> Self {
-        Self {
-            access_time: fat_time_to_unix_time(dentry.access_date, None),
-            create_time: fat_time_to_unix_time(dentry.create_date, Some(dentry.create_time)),
-            mod_time: fat_time_to_unix_time(dentry.mod_date, Some(dentry.mod_time)),
-        }
+    pub fn from(dentry: &FatDentry) -> Result<Self> {
+        Ok(Self {
+            access_time: fat_time_to_unix_time(dentry.access_date, None)?,
+            create_time: fat_time_to_unix_time(dentry.create_date, Some(dentry.create_time))?,
+            mod_time: fat_time_to_unix_time(dentry.mod_date, Some(dentry.mod_time))?,
+        })
     }
 }
 
-pub fn fat_time_to_unix_time(date: u16, time: Option<u16>) -> u32 {
+pub fn fat_time_to_unix_time(date: u16, time: Option<u16>) -> Result<u32> {
     let year = ((date & 0xFE00) >> 9) + 1980;
     let month = (date & 0x1E0) >> 5;
     let day = date & 0x1F;
@@ -61,7 +61,7 @@ pub fn fat_time_to_unix_time(date: u16, time: Option<u16>) -> u32 {
     }
 
     let datetime = date.and_hms(u32::from(hour), u32::from(minute), u32::from(second));
-    u32::try_from(datetime.timestamp()).expect("Timestamp after year 2038 does not fit into 32 bits")
+    u32::try_from(datetime.timestamp()).context("Timestamp after year 2038 does not fit into 32 bits")
 }
 
 impl<'a> FatTreeSerializer<'a> {

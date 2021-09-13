@@ -1,4 +1,4 @@
-use std::any::{Any, TypeId};
+use std::any::{type_name, Any, TypeId};
 use std::mem::size_of;
 use std::rc::Rc;
 
@@ -29,9 +29,10 @@ struct Header {
 }
 
 impl<'a> StreamArchiver<'a> {
+    /// `page_size` must be greater than or equal to `size_of::<PageIdx>() + size_of::<T>()` for every type `T` that
+    /// will be archived. PANICS: Panics if `page_size < size_of::<PageIdx>() + size_of::<Header>()`.
     pub fn new(allocator: Rc<Allocator<'a>>, page_size: usize) -> Self {
-        const MIN_PAGE_PAYLOAD_SIZE: usize = 50;
-        assert!(page_size >= size_of::<PageIdx>() + MIN_PAGE_PAYLOAD_SIZE);
+        assert!(page_size >= size_of::<PageIdx>() + size_of::<Header>());
 
         Self {
             head: None,
@@ -53,6 +54,7 @@ impl<'a> StreamArchiver<'a> {
         Ok((Reader::new(head, self.page_size, allocated_reader), new_allocator))
     }
 
+    /// PANICS: Panics if `size_of::<PageIdx>() + size_of::<T>() > self.page_size`
     pub fn archive<T>(&mut self, objects: Vec<T>) -> Result<()>
     where T: Any {
         let header = Header { len: objects.len(), type_id: TypeId::of::<T>() };
@@ -133,11 +135,16 @@ impl<'a> StreamArchiver<'a> {
     /// SAFETY: Only safe if consistent with the preceding header. I.e. either:
     /// 1) The preceding header `h` is followed by `h.len` objects. Then `object must be of type `Header`; or
     /// 2) The preceding header `h` is followed by fewer than `h.len` objects. Then `T` must have the ID `h.type_id`.
+    /// PANICS: Panics if `size_of::<PageIdx>() + size_of::<T>() > self.page_size`
     unsafe fn add_object<T>(&mut self, object: T) -> Result<()> {
         if self.space_left_in_page() < size_of::<T>() {
             self.write_page()?;
         }
-        assert!(self.space_left_in_page() >= size_of::<T>());
+        assert!(
+            self.space_left_in_page() >= size_of::<T>(),
+            "Object of type {} does not fit into a StreamArchiver page.",
+            type_name::<T>()
+        );
 
         let ptr = self.current_page.as_ptr().add(self.position_in_current_page);
         self.position_in_current_page += size_of::<T>();
@@ -161,6 +168,7 @@ pub struct Reader<'a> {
 }
 
 impl<'a> Reader<'a> {
+    /// PANICS: Panics if `first_page_idx` is `None`.
     pub fn new(first_page_idx: PageIdx, page_size: usize, allocated_reader: AllocatedReader<'a>) -> Self {
         Self {
             current_page: allocated_reader
@@ -172,6 +180,9 @@ impl<'a> Reader<'a> {
         }
     }
 
+    // TODO unsafe if reading past the last header!
+    /// PANICS: Panics if called after reaching the end of the archive or if the next archived object is not of type
+    /// `T`.
     pub fn next<T>(&mut self) -> Vec<T>
     where T: Any {
         // SAFETY: Since `self` was created from a consistent `StreamArchiver`, right after instantiation the object at
@@ -213,6 +224,7 @@ impl<'a> Reader<'a> {
         self.page_size - self.position_in_current_page
     }
 
+    /// PANICS: Panics if called after reaching the end of the archive.
     fn next_page(&mut self) {
         // SAFETY: Safe because every page begins with the next `PageIdx`.
         let next_page_idx = unsafe { std::ptr::read_unaligned(self.current_page.as_ptr() as *const PageIdx) };

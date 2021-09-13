@@ -38,6 +38,7 @@ where
         (!LoHalf::zero()).into()
     }
 
+    /// PANICS: Panics if a `LoHalf` and a `HiHalf` don't fully fit into a `Full`.
     pub fn new(lo: &'a mut LoHalf, hi: &'a mut HiHalf) -> Self {
         // ideally would be a const_assert, but it doesn't work with generics
         assert!(
@@ -105,6 +106,7 @@ where
 {
     const LO_HALF_BIT_COUNT: usize = size_of::<LoHalf>() * 8;
 
+    /// PANICS: Panics if a `LoHalf` and a `HiHalf` don't fully fit into a `Full`.
     pub fn new(lo: &'a LoHalf, hi: &'a HiHalf) -> Self {
         // ideally would be a const_assert, but it doesn't work with generics
         assert!(

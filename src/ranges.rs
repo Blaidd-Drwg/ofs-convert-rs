@@ -112,7 +112,7 @@ impl<Idx: Ord + Copy> Ranges<Idx> {
         result
     }
 
-    /// Returns the index in `self.ranges` of the first range that ends at or after `range.start`. If there is none,
+    /// Returns the index in `self.ranges` of the first range that ends *at or after* `range.start`. If there is none,
     /// returns `self.ranges.len()`.
     fn first_merge_candidate(&self, range: &Range<Idx>) -> usize {
         match self.ranges.binary_search_by_key(&range.start, |candidate| candidate.end) {
@@ -120,7 +120,7 @@ impl<Idx: Ord + Copy> Ranges<Idx> {
         }
     }
 
-    /// Returns the index in `self.ranges` of the first range that ends after `range.start`. If there is none, returns
+    /// Returns the index in `self.ranges` of the first range that ends *after* `range.start`. If there is none, returns
     /// `self.ranges.len()`.
     fn first_overlap_candidate(&self, range: &Range<Idx>) -> usize {
         match self.ranges.binary_search_by_key(&range.start, |candidate| candidate.end) {

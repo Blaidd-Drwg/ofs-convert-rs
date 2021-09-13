@@ -57,12 +57,12 @@ impl<'a> Partition<'a> {
             .with_context(|| format!("File size {} does not fit into a usize", len))
     }
 
-    // error_chain?
+    // TODO why?
     /// partition_path must be absolute
     fn is_mounted(partition_path: &Path) -> Result<bool> {
-        let path_str = partition_path.to_str().expect("Partition path is not valid UTF-8");
-        let output =
-            String::from_utf8(Command::new("mount").output()?.stdout).expect("mount output is not valid UTF-8");
+        let path_str = partition_path.to_str().context("Partition path is not valid UTF-8")?;
+        let output_bytes = Command::new("mount").output()?.stdout;
+        let output = String::from_utf8(output_bytes).expect("mount output is not valid UTF-8");
         Ok(output.lines().any(|line| line.starts_with(path_str)))
     }
 

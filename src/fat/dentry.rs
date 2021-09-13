@@ -1,3 +1,5 @@
+use anyhow::Result;
+
 use crate::fat::FatTableIndex;
 use crate::lohi::LoHi;
 use crate::serialization::fat_time_to_unix_time;
@@ -111,7 +113,7 @@ impl FatDentry {
         if self.has_file_extension() {
             let extension_ascii_bytes: Vec<_> = self.short_extension.iter().copied().collect();
             let mut extension_string = String::from_utf8(extension_ascii_bytes)
-                .expect("FAT dentry has extensions containing non-ASCII characters");
+                .expect("FAT dentry has extension containing non-ASCII characters");
             if self.has_lowercase_extension() {
                 extension_string.make_ascii_lowercase();
             }
@@ -121,15 +123,15 @@ impl FatDentry {
     }
 
     // TODO either rework archiving or move `fat_time_to_unix_time` to this module
-    pub fn access_time_as_unix(&self) -> u32 {
+    pub fn access_time_as_unix(&self) -> Result<u32> {
         fat_time_to_unix_time(self.access_date, None)
     }
 
-    pub fn create_time_as_unix(&self) -> u32 {
+    pub fn create_time_as_unix(&self) -> Result<u32> {
         fat_time_to_unix_time(self.create_date, Some(self.create_time))
     }
 
-    pub fn modify_time_as_unix(&self) -> u32 {
+    pub fn modify_time_as_unix(&self) -> Result<u32> {
         fat_time_to_unix_time(self.mod_date, Some(self.mod_time))
     }
 }
