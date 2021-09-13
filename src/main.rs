@@ -10,11 +10,13 @@ mod ranges;
 mod serialization;
 mod util;
 
-use std::env::args;
+use std::io::{self, Write};
 use std::mem::size_of;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
+use clap::{App, Arg};
 use static_assertions::const_assert;
+use text_io::try_read;
 
 use crate::ext4::SuperBlock;
 use crate::fat::FatFs;
@@ -24,25 +26,54 @@ use crate::serialization::FatTreeSerializer;
 const_assert!(size_of::<usize>() >= size_of::<u32>());
 
 fn main() -> Result<()> {
-    if args().len() != 2 {
-        print_help();
-        std::process::exit(1);
+    let matches =
+        App::new("ofs-convert")
+            .arg(
+                Arg::with_name("PARTITION_PATH")
+                    .required(true)
+                    .help("The partition containing the FAT32 filesystem that should be converted"),
+            )
+            .arg(Arg::with_name("force").long("force").short("f").help(
+                "Skip fsck (can lead to unexpected errors and data loss if the input filesystem is inconsistent)",
+            ))
+            .get_matches();
+
+    let partition_path = matches.value_of("PARTITION_PATH").unwrap();
+    if !matches.is_present("force") {
+        match fsck(partition_path) {
+            Ok(true) => (),
+            Ok(false) => bail!(
+                "fsck failed. Running ofs-convert on an inconsistent FAT32 partition can lead to unexpected errors \
+                 and data loss. To force the conversion, run again with the '-f' flag."
+            ),
+            Err(e) => {
+                println!("Error: {}", e);
+                println!(
+                    "Unable to run fsck. Running ofs-convert on an inconsistent FAT32 partition can lead to \
+                     unexpected errors and data loss."
+                );
+                print!("Run anyway? [y/n] ");
+                io::stdout().flush()?;
+                let answer: String = try_read!("{}\n")?;
+                if !yn::yes(answer) {
+                    return Ok(());
+                }
+            }
+        }
     }
 
-    match args().nth(1).unwrap().as_str() {
-        "-h" | "--help" => print_help(),
-        partition_path => unsafe { ofs_convert(partition_path)? },
-    }
-    Ok(())
+    // SAFETY: We've done our best to ensure `partition_path` contains a consistent FAT32 partition
+    unsafe { ofs_convert(partition_path) }
 }
 
-fn print_help() {
-    println!("Usage: ofs-convert-rs path/to/fat-partition");
+fn fsck(partition_path: &str) -> Result<bool> {
+    bail!("Not implemented lol")
 }
 
-/// SAFETY: `partition_path` must be a path to a valid FAT partition. TODO update when all the C parts are ported
+/// SAFETY: `partition_path` must point to a partition containing a consistent FAT32 filesystem.
 unsafe fn ofs_convert(partition_path: &str) -> Result<()> {
     let mut partition = Partition::open(partition_path)?;
+    // SAFETY: TODO
     let (fat_fs, mut allocator) =
         FatFs::new_with_allocator(partition.as_mut_ptr(), partition.len(), partition.lifetime)?;
     let boot_sector = fat_fs.boot_sector();

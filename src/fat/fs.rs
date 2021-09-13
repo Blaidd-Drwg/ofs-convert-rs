@@ -59,8 +59,8 @@ impl<'a> FatFs<'a> {
     /// SAFETY: The caller must guarantee that:
     /// - the `partition_len` bytes starting at `partition_ptr` are all valid memory;
     /// - this memory will remain valid for the lifetime 'a;
-    /// - this memory represents a consistent FAT filesystem;
-    /// - no pointer to this memory will be dereferenced during the lifetime 'a.
+    /// - no pointer to this memory will be dereferenced during the lifetime 'a;
+    /// - this memory represents a consistent FAT filesystem.
     pub unsafe fn new_with_allocator(
         partition_ptr: *mut u8,
         partition_len: usize,
