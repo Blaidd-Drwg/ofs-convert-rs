@@ -12,6 +12,7 @@ mod util;
 
 use std::io::{self, Write};
 use std::mem::size_of;
+use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 use clap::{App, Arg};
@@ -40,7 +41,7 @@ fn main() -> Result<()> {
 
     let partition_path = matches.value_of("PARTITION_PATH").unwrap();
     if !matches.is_present("force") {
-        match fsck(partition_path) {
+        match fsck_fat(partition_path) {
             Ok(true) => (),
             Ok(false) => bail!(
                 "fsck failed. Running ofs-convert on an inconsistent FAT32 partition can lead to unexpected errors \
@@ -66,8 +67,10 @@ fn main() -> Result<()> {
     unsafe { ofs_convert(partition_path) }
 }
 
-fn fsck(partition_path: &str) -> Result<bool> {
-    bail!("Not implemented lol")
+/// Returns `Ok(true)` if the filesystem check is successful, `Ok(false)` if it fails, and `Err` if fsck fails to run
+/// (e.g. if the command `fsck.fat` is not found).
+fn fsck_fat(partition_path: &str) -> Result<bool> {
+    Ok(Command::new("fsck.fat").arg("-n").arg(partition_path).status()?.success())
 }
 
 /// SAFETY: `partition_path` must point to a partition containing a consistent FAT32 filesystem.
