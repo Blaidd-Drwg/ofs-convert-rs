@@ -1,11 +1,9 @@
-use std::ops::Range;
+use std::ops::RangeInclusive;
 
-use crate::fat::{ClusterIdx, FatDentry};
-
-pub type Extent = Range<ClusterIdx>;
+use crate::fat::{DataClusterIdx, FatDentry};
 
 pub struct FatFile {
     pub name: String,
     pub dentry: FatDentry,
-    pub data_ranges: Vec<Extent>,
+    pub data_ranges: Vec<RangeInclusive<DataClusterIdx>>,
 }

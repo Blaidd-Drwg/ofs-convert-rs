@@ -1,7 +1,8 @@
 use std::convert::TryFrom;
+use std::iter::Step;
 use std::marker::PhantomData;
 use std::mem::size_of;
-use std::ops::Range;
+use std::ops::RangeInclusive;
 use std::slice;
 
 use anyhow::{bail, Result};
@@ -105,13 +106,8 @@ impl<'a> FatFs<'a> {
         self.boot_sector.dentries_per_cluster()
     }
 
-    // TODO these conversions are a mess
-    pub fn data_cluster_from_cluster(&self, cluster_idx: ClusterIdx) -> Result<DataClusterIdx> {
-        let data_cluster_idx = cluster_idx.checked_sub(self.boot_sector.first_data_cluster());
-        match data_cluster_idx {
-            Some(data_cluster_idx) => Ok(DataClusterIdx::new(data_cluster_idx)),
-            None => bail!("cluster_idx is not a data cluster index"),
-        }
+    pub fn cluster_from_data_cluster(&self, data_cluster_idx: DataClusterIdx) -> ClusterIdx {
+        ClusterIdx::from(data_cluster_idx) + self.boot_sector.first_data_cluster()
     }
 
     pub fn data_cluster(&self, data_cluster_idx: DataClusterIdx) -> &Cluster {
@@ -130,22 +126,22 @@ impl<'a> FatFs<'a> {
 
     /// Given a file's first FAT index, follow the FAT chain and collect all of the file's FAT indices into a list of
     /// adjacent ranges.
-    pub fn data_ranges(&'a self, first_fat_idx: FatTableIndex) -> Vec<Range<ClusterIdx>> {
+    pub fn data_ranges(&'a self, first_fat_idx: FatTableIndex) -> Vec<RangeInclusive<DataClusterIdx>> {
         if first_fat_idx.is_zero_length_file() {
             return Vec::new();
         }
 
-        let first_cluster_idx = first_fat_idx.to_cluster_idx(self.boot_sector());
-        let mut current_range = first_cluster_idx..first_cluster_idx; // we don't use RangeInclusive because it does not allow mutating end
+        let first_data_cluster_idx = first_fat_idx.to_data_cluster_idx();
+        let mut current_range = first_data_cluster_idx..=first_data_cluster_idx;
         let mut ranges = Vec::new();
 
-        for fat_idx in FatIdxIter::new(first_fat_idx, self.fat_table()) {
-            let cluster_idx = fat_idx.to_cluster_idx(self.boot_sector());
-            if cluster_idx == current_range.end {
-                current_range.end += 1;
+        for fat_idx in FatIdxIter::new(first_fat_idx, self.fat_table()).skip(1) {
+            let next_data_cluster_idx = fat_idx.to_data_cluster_idx();
+            if DataClusterIdx::steps_between(current_range.end(), &next_data_cluster_idx) == Some(1) {
+                current_range = current_range.into_inner().0..=next_data_cluster_idx;
             } else {
                 ranges.push(current_range);
-                current_range = cluster_idx..cluster_idx + 1;
+                current_range = next_data_cluster_idx..=next_data_cluster_idx;
             }
         }
         ranges.push(current_range);

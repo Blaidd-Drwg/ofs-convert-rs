@@ -1,6 +1,5 @@
 use std::cell::RefCell;
 use std::convert::{TryFrom, TryInto};
-use std::iter::Step;
 use std::ops::Range;
 use std::rc::Rc;
 
@@ -100,12 +99,12 @@ impl<'a> FatTreeSerializer<'a> {
     /// SAFETY: safe if `first_fat_idx` points to a cluster belonging to a directory
     unsafe fn serialize_directory_content(&self, first_fat_idx: FatTableIndex) -> Result<()> {
         // SAFETY: safe because `first_fat_index` belongs to a directory
-        for mut file in self.fat_fs.dir_content_iter(first_fat_idx) {
+        for file in self.fat_fs.dir_content_iter(first_fat_idx) {
             if file.dentry.is_dir() {
                 self.serialize_directory(file)?;
             } else {
-                self.copy_file_data_to_unforbidden(&mut file)?;
-                self.archive_regular_file(file)?;
+                let non_overlapping = self.make_file_non_overlapping(file)?;
+                self.archive_regular_file(non_overlapping)?;
             }
         }
         Ok(())
@@ -117,7 +116,7 @@ impl<'a> FatTreeSerializer<'a> {
         Ok(())
     }
 
-    fn archive_regular_file(&self, file: FatFile) -> Result<()> {
+    fn archive_regular_file(&self, file: NonOverlappingFatFile) -> Result<()> {
         let mut archiver = self.stream_archiver.borrow_mut();
         archiver.archive(vec![FileType::RegularFile])?;
         archiver.archive(vec![file.dentry])?;
@@ -134,37 +133,42 @@ impl<'a> FatTreeSerializer<'a> {
         Ok(())
     }
 
-    fn copy_file_data_to_unforbidden(&self, file: &mut FatFile) -> Result<()> {
-        let old_ranges = std::mem::take(&mut file.data_ranges);
-        for range in old_ranges {
-            for (range_fragment, forbidden) in self.forbidden_ranges.split_overlapping(range) {
+    fn make_file_non_overlapping(&self, file: FatFile) -> Result<NonOverlappingFatFile> {
+        let mut non_overlapping = NonOverlappingFatFile::new(file.name, file.dentry);
+
+        for mut data_cluster_range in file.data_ranges {
+            let start_cluster_idx = self.fat_fs.cluster_from_data_cluster(*data_cluster_range.start());
+            let end_cluster_idx = self.fat_fs.cluster_from_data_cluster(*data_cluster_range.end()) + 1;
+            let cluster_range = start_cluster_idx..end_cluster_idx;
+
+            for (range_fragment, forbidden) in self.forbidden_ranges.split_overlapping(cluster_range) {
                 if forbidden {
-                    let data_cluster_fragment = self.fat_fs.data_cluster_from_cluster(range_fragment.start)?
-                        ..self.fat_fs.data_cluster_from_cluster(range_fragment.end)?;
-                    let mut copied_ranges = self.copy_range_to_unforbidden(data_cluster_fragment)?;
-                    file.data_ranges.append(&mut copied_ranges);
+                    let mut copied_ranges =
+                        self.copy_data_to_new_clusters(&mut data_cluster_range, range_fragment.len())?;
+                    non_overlapping.data_ranges.append(&mut copied_ranges);
                 } else {
-                    file.data_ranges.push(range_fragment);
+                    non_overlapping.data_ranges.push(range_fragment);
                 }
             }
         }
-        Ok(())
+        Ok(non_overlapping)
     }
 
-    fn copy_range_to_unforbidden(&self, mut range: Range<DataClusterIdx>) -> Result<Vec<Range<ClusterIdx>>> {
+    /// Given an iterator over `DataClusterIdx`s, copy the first `len` to newly allocated clusters and return these
+    /// clusters' `ClusterIdx`s. `iter` must have at least `len` elements.
+    fn copy_data_to_new_clusters<I: Iterator<Item = DataClusterIdx>>(
+        &self,
+        iter: &mut I,
+        mut len: usize,
+    ) -> Result<Vec<Range<ClusterIdx>>> {
         let mut copied_fragments = Vec::new();
-        while !range.is_empty() {
-            let range_len = DataClusterIdx::steps_between(&range.start, &range.end).expect(
-                "Unreachable: `range` is not empty, so `range_len` is positive, and `usize` is at least as wide as \
-                 `DataClusterIdx.0`, so no overflow",
-            );
-            let mut allocated = self.allocator.allocate(range_len)?;
-            let allocated_len = allocated.len();
-            for (old_data_cluster_idx, mut new_cluster_idx) in range.clone().zip(allocated.iter_mut()) {
+        while len > 0 {
+            let mut allocated = self.allocator.allocate(len)?;
+            for (old_data_cluster_idx, mut new_cluster_idx) in iter.zip(allocated.iter_mut()) {
                 let old_cluster = self.fat_fs.data_cluster(old_data_cluster_idx);
                 self.allocator.cluster_mut(&mut new_cluster_idx).copy_from_slice(old_cluster);
             }
-            range.start = DataClusterIdx::forward(range.start, allocated_len);
+            len -= allocated.len();
             copied_fragments.push(allocated.into());
         }
         Ok(copied_fragments)
@@ -174,5 +178,17 @@ impl<'a> FatTreeSerializer<'a> {
         std::mem::drop(self.allocator); // drop the Rc, allowing `self.stream_archiver` to unwrap it
         let (reader, allocator) = self.stream_archiver.into_inner().into_reader()?;
         Ext4TreeDeserializer::new_with_dry_run(reader, allocator, self.fat_fs)
+    }
+}
+
+struct NonOverlappingFatFile {
+    pub name: String,
+    pub dentry: FatDentry,
+    pub data_ranges: Vec<Range<ClusterIdx>>,
+}
+
+impl NonOverlappingFatFile {
+    pub fn new(name: String, dentry: FatDentry) -> Self {
+        Self { name, dentry, data_ranges: Vec::new() }
     }
 }
