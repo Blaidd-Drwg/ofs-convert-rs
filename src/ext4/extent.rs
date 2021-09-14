@@ -138,6 +138,13 @@ impl ExtentHeader {
     pub fn is_full(&self) -> bool {
         self.valid_entry_count == self.max_entry_count
     }
+
+    /// Performs a sanity check on whether the invariants on `self` hold.
+    pub fn is_valid(&self) -> bool {
+        let entry_count_is_valid = self.valid_entry_count <= self.max_entry_count;
+        let non_leaf_has_at_least_one_child = self.depth == 0 || self.valid_entry_count > 0;
+        entry_count_is_valid && non_leaf_has_at_least_one_child
+    }
 }
 
 // SAFETY: Any entry `self.all_entries[i]` with `i >= self.header.valid_entry_count` is inconsistent. Reading such an
@@ -214,7 +221,7 @@ impl<'a> ExtentTree<'a> {
 
 impl<'a> ExtentTreeLevel<'a> {
     /// SAFETY: Safe if the entries in `entries` form a consistent extent tree level. In particular:
-    /// - `entries[0]` must be an `ExtentHeader`;
+    /// - `entries[0]` must be a valid `ExtentHeader`;
     /// - every entry in `entries[1..header.valid_entry_count]` must be either:
     ///     - a valid `Extent` if `header.depth == 0`. In particular, for every entry `entry`:
     ///         - every block in `entry.as_range` must be a data block.
@@ -222,10 +229,10 @@ impl<'a> ExtentTreeLevel<'a> {
     ///         - `entry` must point to a block that also represents a consistent extent tree level;
     ///         - the header `child_header` of the block pointed to by `entry` must have `child_header.depth ==
     ///           header.depth - 1`.
-    /// TODO what if entries.len() == 1? should be ok if depth == 0, otherwise not
     pub unsafe fn new(entries: &'a mut [ExtentTreeElement]) -> Self {
         let (header_slice, used_entries) = entries.split_at_mut(1);
         let header = &mut header_slice[0].header;
+        assert!(header.is_valid());
         assert_eq!(header.max_entry_count as usize, used_entries.len());
 
         Self { header, all_entries: used_entries }
