@@ -26,6 +26,8 @@ use crate::serialization::FatTreeSerializer;
 
 const_assert!(size_of::<usize>() >= size_of::<u32>());
 
+// TODO sometimes using Result where Option would be more idiomatic
+// TODO add context to Errs
 fn main() -> Result<()> {
     let matches =
         App::new("ofs-convert")

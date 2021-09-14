@@ -9,7 +9,7 @@ use anyhow::{bail, Result};
 use crate::fat::ClusterIdx;
 use crate::ranges::{NotCoveredRange, Ranges};
 
-// TODO after reading, make directory dataclusters free
+// TODO after/during serialization, mark directory dataclusters as free
 /// An `AllocatedClusterIdx` represents a cluster that was allocated by an `Allocator` and functions as a token to
 /// access that cluster, either through the `Allocator` itself or through the `AllocatedReader` derived from it.
 /// Invariant: no two `AllocatedClusterIdx` may have the same value; otherwise, `Allocator::cluster_mut` might alias.
@@ -152,8 +152,6 @@ impl<'a> Allocator<'a> {
     /// clusters that could have been allocated by `self` but were not yet allocated.
     pub fn split_into_reader(self) -> (AllocatedReader<'a>, Self) {
         let cursor_byte = self.cursor.get() as usize * self.cluster_size;
-        // TODO free ranges used for FAT dentries
-
         let reader = AllocatedReader {
             fs_ptr: self.fs_ptr,
             fs_len: cursor_byte,

@@ -158,7 +158,6 @@ impl LongFileName {
         self.sequence_no & 0b0001_1111
     }
 
-    // TODO handle Errors
     pub fn to_utf8_string(self) -> String {
         std::char::decode_utf16(self.to_utf16_string())
             .map(|c| c.expect("FAT long file name entry contains non-UTF16 character"))
