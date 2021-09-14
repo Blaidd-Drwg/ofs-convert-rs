@@ -28,7 +28,7 @@ impl FatTableIndex {
 
     pub fn to_data_cluster_idx(self) -> DataClusterIdx {
         assert!(self.0 >= ROOT_FAT_IDX.0);
-        DataClusterIdx::new(self.0 - ROOT_FAT_IDX.0)
+        DataClusterIdx(self.0 - ROOT_FAT_IDX.0)
     }
 
     pub fn to_cluster_idx(self, boot_sector: &BootSector) -> ClusterIdx {
@@ -79,14 +79,9 @@ impl From<FatTableIndex> for u32 {
 
 
 /// An index identifying a cluster in the data section of the filesystem.
-// TODO unsafe: must be valid
 #[derive(PartialEq, Eq, Copy, Clone, PartialOrd, Ord)]
 pub struct DataClusterIdx(u32);
 impl DataClusterIdx {
-    pub const fn new(idx: u32) -> Self {
-        Self(idx)
-    }
-
     pub fn to_fat_index(self) -> FatTableIndex {
         FatTableIndex::new(self.0 + ROOT_FAT_IDX.0)
     }
