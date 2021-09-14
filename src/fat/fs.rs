@@ -5,7 +5,7 @@ use std::mem::size_of;
 use std::ops::RangeInclusive;
 use std::slice;
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 
 use crate::allocator::Allocator;
 use crate::ext4::Ext4Fs;
@@ -110,7 +110,13 @@ impl<'a> FatFs<'a> {
         ClusterIdx::from(data_cluster_idx) + self.boot_sector.first_data_cluster()
     }
 
+    pub fn is_used(&self, data_cluster_idx: DataClusterIdx) -> bool {
+        !self.fat_table[data_cluster_idx.to_fat_index()].is_free()
+    }
+
+    /// PANICS: Panics if `data_cluster_idx` is not a valid, in-use data cluster.
     pub fn data_cluster(&self, data_cluster_idx: DataClusterIdx) -> &Cluster {
+        assert!(self.is_used(data_cluster_idx));
         let cluster_size = self.cluster_size();
         let start_byte = usize::from(data_cluster_idx) * cluster_size;
         assert!(start_byte + cluster_size <= self.data_len);

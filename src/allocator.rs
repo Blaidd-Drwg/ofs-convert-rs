@@ -10,7 +10,6 @@ use crate::fat::ClusterIdx;
 use crate::ranges::{NotCoveredRange, Ranges};
 
 // TODO after reading, make directory dataclusters free
-// TODO ensure DataClusterIdx can also not be constructed
 /// An `AllocatedClusterIdx` represents a cluster that was allocated by an `Allocator` and functions as a token to
 /// access that cluster, either through the `Allocator` itself or through the `AllocatedReader` derived from it.
 /// Invariant: no two `AllocatedClusterIdx` may have the same value; otherwise, `Allocator::cluster_mut` might alias.
@@ -31,7 +30,6 @@ impl AllocatedClusterIdx {
     }
 
     /// SAFETY: This is safe since it cannot be converted back to an `AllocatedClusterIdx` or to a `DataClusterIdx`.
-    // TODO make it so that it *actually* cannot be converted to a DataClusterIdx
     pub fn as_cluster_idx(&self) -> ClusterIdx {
         self.0
     }

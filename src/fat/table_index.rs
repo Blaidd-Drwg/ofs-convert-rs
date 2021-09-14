@@ -2,7 +2,11 @@ use std::convert::TryFrom;
 use std::iter::Step;
 use std::ops::{Add, AddAssign, Index};
 
-use crate::fat::{BootSector, ClusterIdx, ROOT_FAT_IDX};
+use crate::fat::{BootSector, ClusterIdx};
+
+/// The first FAT index belonging to the root directory. This corresponds to the first data cluster, i.e. the n-th FAT
+/// entry corresponds to the (n-2)-th data cluster.
+pub const ROOT_FAT_IDX: FatTableIndex = FatTableIndex(2);
 
 /// An index identifying a FAT entry.
 #[derive(PartialEq, Eq, Copy, Clone, PartialOrd, Ord)]
@@ -26,9 +30,10 @@ impl FatTableIndex {
         Self(idx)
     }
 
+    /// PANICS: Panics if `self` is a special value that does not represent an actual cluster
     pub fn to_data_cluster_idx(self) -> DataClusterIdx {
-        assert!(self.0 >= ROOT_FAT_IDX.0);
-        DataClusterIdx(self.0 - ROOT_FAT_IDX.0)
+        assert!(!self.is_chain_end() && !self.is_zero_length_file() && !self.is_free());
+        DataClusterIdx(self.0.checked_sub(ROOT_FAT_IDX.0).unwrap())
     }
 
     pub fn to_cluster_idx(self, boot_sector: &BootSector) -> ClusterIdx {
@@ -83,7 +88,7 @@ impl From<FatTableIndex> for u32 {
 pub struct DataClusterIdx(u32);
 impl DataClusterIdx {
     pub fn to_fat_index(self) -> FatTableIndex {
-        FatTableIndex::new(self.0 + ROOT_FAT_IDX.0)
+        FatTableIndex(self.0 + ROOT_FAT_IDX.0)
     }
 
     pub fn to_ne_bytes(self) -> [u8; 4] {
