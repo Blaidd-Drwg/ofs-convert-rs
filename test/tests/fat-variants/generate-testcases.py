@@ -17,9 +17,9 @@ CLUSTER_COUNT = 100000
 
 GENERATE_SH_TEMPLATE = '''#!/usr/bin/env bash
 mkdir -p "$1/dir/dir2"
-dd if=/dev/zero bs={half_block_size} count=1 > "$1/small_file"
-dd if=/dev/zero bs={half_block_size} count=3 > "$1/dir/file"
-dd if=/dev/zero bs={block_size} count={bpg_plus_one} > "$1/dir/dir2/large_file"
+dd if=/dev/urandom bs={half_block_size} count=1 > "$1/small_file"
+dd if=/dev/urandom bs={half_block_size} count=3 > "$1/dir/file"
+dd if=/dev/urandom bs={block_size} count={bpg_plus_one} > "$1/dir/dir2/large_file"
 '''
 
 

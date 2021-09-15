@@ -10,17 +10,17 @@ BLOCK_COUNT=1733
 #   - filling the rest of the space with the big file
 
 for i in $(seq 1 $BLOCK_COUNT); do
-	dd if=/dev/zero of="$1/smallfile$i" bs=1024 count=1
+	dd if=/dev/urandom of="$1/smallfile$i" bs=1024 count=1
 done
 
 for i in $(seq 1 2 $BLOCK_COUNT); do
 	rm "$1/smallfile$i"
 done
 
-dd if=/dev/zero of="$1/bigfile" bs=1024 count=$(($BLOCK_COUNT / 2))
+dd if=/dev/urandom of="$1/bigfile" bs=1024 count=$(($BLOCK_COUNT / 2))
 
 for i in $(seq 2 2 $BLOCK_COUNT); do
 	rm "$1/smallfile$i"
 done
 
-dd if=/dev/zero of="$1/bigfile" bs=1024 count=$(($BLOCK_COUNT - $BLOCK_COUNT / 2)) oflag=append conv=notrunc
+dd if=/dev/urandom of="$1/bigfile" bs=1024 count=$(($BLOCK_COUNT - $BLOCK_COUNT / 2)) oflag=append conv=notrunc
