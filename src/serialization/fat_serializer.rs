@@ -147,6 +147,9 @@ impl<'a> FatTreeSerializer<'a> {
                         self.copy_data_to_new_clusters(&mut data_cluster_range, range_fragment.len())?;
                     non_overlapping.data_ranges.append(&mut copied_ranges);
                 } else {
+                    data_cluster_range
+                        .advance_by(range_fragment.len())
+                        .expect("data_cluster_range is shorter than the sum of range_fragment lengths");
                     non_overlapping.data_ranges.push(range_fragment);
                 }
             }
@@ -158,13 +161,15 @@ impl<'a> FatTreeSerializer<'a> {
     /// clusters' `ClusterIdx`s. `iter` must have at least `len` elements.
     fn copy_data_to_new_clusters<I: Iterator<Item = DataClusterIdx>>(
         &self,
-        iter: &mut I,
+        mut iter: &mut I,
         mut len: usize,
     ) -> Result<Vec<Range<ClusterIdx>>> {
         let mut copied_fragments = Vec::new();
         while len > 0 {
             let mut allocated = self.allocator.allocate(len)?;
-            for (old_data_cluster_idx, mut new_cluster_idx) in iter.zip(allocated.iter_mut()) {
+            // zip in this order: this way, when `allocated` is empty, `iter.next()` is not called, and we consume
+            // exactly `allocated.len()` elements from `iter`.
+            for (mut new_cluster_idx, old_data_cluster_idx) in allocated.iter_mut().zip(&mut iter) {
                 let old_cluster = self.fat_fs.data_cluster(old_data_cluster_idx);
                 self.allocator.cluster_mut(&mut new_cluster_idx).copy_from_slice(old_cluster);
             }

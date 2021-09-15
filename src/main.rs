@@ -1,4 +1,5 @@
 #![feature(step_trait)]
+#![feature(iter_advance_by)]
 
 mod allocator;
 mod bitmap;
