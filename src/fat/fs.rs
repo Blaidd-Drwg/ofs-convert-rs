@@ -110,6 +110,10 @@ impl<'a> FatFs<'a> {
         ClusterIdx::from(data_cluster_idx) + self.boot_sector.first_data_cluster()
     }
 
+    pub fn cluster_count(&self) -> u32 {
+        self.boot_sector.cluster_count()
+    }
+
     pub fn is_used(&self, data_cluster_idx: DataClusterIdx) -> bool {
         !self.fat_table[data_cluster_idx.to_fat_index()].is_free()
     }

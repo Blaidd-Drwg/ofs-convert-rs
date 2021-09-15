@@ -92,6 +92,10 @@ impl BootSector {
         }
     }
 
+    pub fn cluster_count(&self) -> u32 {
+        self.sector_count() / u32::from(self.sectors_per_cluster)
+    }
+
     /// in bytes
     pub fn fs_size(&self) -> u64 {
         u64::from(self.bytes_per_sector) * u64::from(self.sector_count())

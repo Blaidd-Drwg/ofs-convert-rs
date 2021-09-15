@@ -197,15 +197,11 @@ impl SuperBlock {
         let min_inodes_per_group = block_size as u32 * 8; // Inodes per group need to fit into a one page bitmap
         sb.s_inodes_per_group = min_inodes_per_group.min(sb.s_blocks_per_group * (block_size as u32) / INODE_RATIO);
 
-        // Same logic as used in mke2fs: If the last block group would have
-        // fewer than 50 data blocks, then reduce the block count and ignore the
-        // remaining space
-        // For some reason in tests we found that mkfs.ext4 didn't follow this logic
-        // and instead set sb.blocks_per_group to a value lower than
-        // `block_size` * 8, but this is easier to implement.
-        // We use the sparse_super2 logic from mke2fs, meaning that the last block
-        // group always has a super block copy.
-        // TODO we would have to move data the falls outside of the bg into a bg, do we do that?
+        // Same logic as used in mke2fs: If the last block group would have fewer than 50 data blocks, then reduce the
+        // block count and ignore the remaining space
+        // For some reason in tests we found that mkfs.ext4 didn't follow this logic and instead set sb.blocks_per_group
+        // to a value lower than `block_size` * 8, but this is easier to implement.
+        // We use the sparse_super2 logic from mke2fs, meaning that the last block group always has a super block copy.
         let mut block_count = fs_len / u64::try_from(block_size).unwrap();
         let mut data_block_count = block_count - sb.s_first_data_block as u64;
         // set the intermediate value in `sb` because it is needed by the call to `sb.block_group_overhead`.

@@ -87,7 +87,10 @@ unsafe fn ofs_convert(partition_path: &str) -> Result<()> {
     let (fat_fs, mut allocator) =
         FatFs::new_with_allocator(partition.as_mut_ptr(), partition.len(), partition.lifetime)?;
     let boot_sector = fat_fs.boot_sector();
-    let forbidden_ranges = SuperBlock::from(boot_sector)?.block_group_overhead_ranges();
+    let superblock = SuperBlock::from(boot_sector)?;
+    let mut forbidden_ranges = superblock.block_group_overhead_ranges();
+    let overhanging_block_range = superblock.block_count_with_padding() as u32..fat_fs.cluster_count();
+    forbidden_ranges.insert(overhanging_block_range);
     for range in &forbidden_ranges {
         allocator.forbid(range.clone());
     }

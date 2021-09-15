@@ -33,6 +33,10 @@ impl<Idx: Ord + Copy> Ranges<Idx> {
     /// Inserts `range` into `self.ranges` in the correct position and merging it with other ranges
     /// in case they overlap.
     pub fn insert(&mut self, range: Range<Idx>) {
+        if range.is_empty() {
+            return;
+        }
+
         let first_merge_candidate_index = self.first_merge_candidate(&range);
 
         // every range ends before `range` starts, so we can simply append it
