@@ -18,7 +18,6 @@ static_assertions = "1.1.0"
 anyhow = "1.0.43"
 clap = "2.33.3"
 text_io = "0.1.9"
-yn = "0.1.1"
 
 [build-dependencies]
 cmake = "0.1.45"

@@ -50,16 +50,16 @@ fn main() -> Result<()> {
                  and data loss. To force the conversion, run again with the '-f' flag."
             ),
             Err(e) => {
-                println!("Error: {}", e);
-                println!(
+                eprintln!("Error: {}", e);
+                eprintln!(
                     "Unable to run fsck. Running ofs-convert on an inconsistent FAT32 partition can lead to \
                      unexpected errors and data loss."
                 );
-                print!("Run anyway? [y/n] ");
-                io::stdout().flush()?;
+                eprint!("Run anyway? [y/N] ");
+                io::stderr().flush()?;
                 let answer: String = try_read!("{}\n")?;
-                if !yn::yes(answer) {
-                    return Ok(());
+                if !is_yes(&answer) {
+                    bail!("Aborted by user");
                 }
             }
         }
@@ -73,6 +73,10 @@ fn main() -> Result<()> {
 /// (e.g. if the command `fsck.fat` is not found).
 fn fsck_fat(partition_path: &str) -> Result<bool> {
     Ok(Command::new("fsck.fat").arg("-n").arg(partition_path).status()?.success())
+}
+
+fn is_yes(s: &str) -> bool {
+    ["y", "yes"].contains(&s.trim().to_lowercase().as_str())
 }
 
 /// SAFETY: `partition_path` must point to a partition containing a consistent FAT32 filesystem.
