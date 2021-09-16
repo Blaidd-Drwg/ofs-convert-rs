@@ -7,14 +7,13 @@ use anyhow::Result;
 use crate::allocator::{AllocatedClusterIdx, AllocatedReader, Allocator};
 
 type Page = [u8];
-type PageIdx = Option<AllocatedClusterIdx>;
+type PageIdx = AllocatedClusterIdx;
 
 pub struct StreamArchiver<'a> {
-    /// The index to the first written page. None if
-    /// - no page has yet been written, or
-    /// - `self.previous_page_idx == self.head` (that is a workaround because PageIdx is not Clone)
-    head: PageIdx,
-    previous_page_idx: PageIdx, // SAFETY: must not be leaked outside of `self`!
+    /// SAFETY: must not be used to access a cluster before `self` is dropped
+    head: Option<PageIdx>,
+    /// SAFETY: must not be leaked outside of `self`
+    previous_page_idx: Option<PageIdx>,
     /// The content of the current page that has yet to be written.
     current_page: Vec<u8>,
     page_size: usize,
@@ -29,17 +28,18 @@ struct Header {
 }
 
 impl<'a> StreamArchiver<'a> {
-    /// `page_size` must be greater than or equal to `size_of::<PageIdx>() + size_of::<T>()` for every type `T` that
-    /// will be archived. PANICS: Panics if `page_size < size_of::<PageIdx>() + size_of::<Header>()`.
+    /// `page_size` must be greater than or equal to `size_of::<Option<PageIdx>>() + size_of::<T>()` for every type `T`
+    /// that will be archived.
+    /// PANICS: Panics if `page_size < size_of::<Option<PageIdx>>() + size_of::<Header>()`.
     pub fn new(allocator: Rc<Allocator<'a>>, page_size: usize) -> Self {
-        assert!(page_size >= size_of::<PageIdx>() + size_of::<Header>());
+        assert!(page_size >= size_of::<Option<PageIdx>>() + size_of::<Header>());
 
         Self {
             head: None,
             current_page: vec![0; page_size],
             previous_page_idx: None,
             page_size,
-            position_in_current_page: size_of::<PageIdx>(),
+            position_in_current_page: size_of::<Option<PageIdx>>(),
             allocator,
         }
     }
@@ -51,11 +51,13 @@ impl<'a> StreamArchiver<'a> {
             "StreamArchiver cannot take ownership of its allocator, somebody else still has a reference to it.",
         );
         let (allocated_reader, new_allocator) = allocator.split_into_reader();
-        let head = self.head.or(self.previous_page_idx);
+        let head = self
+            .head
+            .expect("StreamArchiver head is None despite a call to write_page succedding");
         Ok((Reader::new(head, self.page_size, allocated_reader), new_allocator))
     }
 
-    /// PANICS: Panics if `size_of::<PageIdx>() + size_of::<T>() > self.page_size`
+    /// PANICS: Panics if `size_of::<Option<PageIdx>>() + size_of::<T>() > self.page_size`
     pub fn archive<T>(&mut self, objects: Vec<T>) -> Result<()>
     where T: Any {
         let header = Header { len: objects.len(), type_id: TypeId::of::<T>() };
@@ -82,45 +84,38 @@ impl<'a> StreamArchiver<'a> {
         Some(self.allocator.cluster_mut(self.previous_page_idx.as_mut()?))
     }
 
-    fn page_mut(&self, page_idx: &mut PageIdx) -> Option<&mut Page> {
-        Some(self.allocator.cluster_mut(page_idx.as_mut()?))
+    fn page_mut(&self, page_idx: &mut PageIdx) -> &mut Page {
+        self.allocator.cluster_mut(page_idx)
     }
 
     /// Never returns `Ok(None)`
     fn allocate_page(&self) -> Result<PageIdx> {
-        Ok(Some(self.allocator.allocate_one()?))
-    }
-
-    /// SAFETY: To avoid aliasing, the caller must ensure that the original and the clone are not used to access a
-    /// cluster simultaneously.
-    unsafe fn clone_page_idx(page_idx: &PageIdx) -> PageIdx {
-        page_idx.as_ref().map(|idx| idx.clone())
+        self.allocator.allocate_one()
     }
 
     fn write_page(&mut self) -> Result<()> {
         let mut page_idx = self.allocate_page()?;
-        self.page_mut(&mut page_idx).unwrap().copy_from_slice(&self.current_page);
+        self.page_mut(&mut page_idx).copy_from_slice(&self.current_page);
 
         // if the current page is not the head, write the current page's index into the previous page's next pointer
         if let Some(previous_page) = self.previous_page_mut() {
-            let ptr = previous_page.as_mut_ptr() as *mut PageIdx;
+            let ptr = previous_page.as_mut_ptr() as *mut Option<PageIdx>;
             unsafe {
                 // SAFETY: Safe because `page_idx_clone` is immediately written to a page, and since `page_idx` is not
-                // leaked outside of `self`, `page_idx_clone` can only be read after `page_idx` has been dropped.
-                let page_idx_clone = Self::clone_page_idx(&page_idx);
+                // leaked outside of `self`, `page_idx_clone` can only be read after `self`, and therefore `page_idx`,
+                // has been dropped.
+                let page_idx_clone = page_idx.clone();
                 // SAFETY: Safe because `ptr` points to `previous_page`, which we have a mutable borrow for.
-                ptr.write_unaligned(page_idx_clone);
+                ptr.write_unaligned(Some(page_idx_clone));
+            }
+        } else {
+            // SAFETY: Safe because `self.head` is not accessed until `self`, and therefore `page_idx`, has been
+            // dropped.
+            unsafe {
+                self.head = Some(page_idx.clone());
             }
         }
-
-        // This is only the case if the previous page is also the head. Since we're replacing the previous page now but
-        // the head still stays the same, we move it to the head.
-        if self.previous_page_idx.is_some() && self.head.is_none() {
-            std::mem::swap(&mut self.previous_page_idx, &mut page_idx);
-            self.head = page_idx;
-        } else {
-            self.previous_page_idx = page_idx;
-        }
+        self.previous_page_idx = Some(page_idx);
 
         // SAFETY: Safe because the content of `self.current_page` has already been written out.
         unsafe {
@@ -134,17 +129,17 @@ impl<'a> StreamArchiver<'a> {
     unsafe fn reset_page(&mut self) {
         self.current_page.fill(0);
         // this is the last page for now, set the next page index to None
-        let ptr = self.current_page.as_mut_ptr() as *mut PageIdx;
+        let ptr = self.current_page.as_mut_ptr() as *mut Option<PageIdx>;
         // SAFETY: Safe because we have a mutable borrow on `self.current_page` and `self.current_page.len() >=
-        // size_of::<PageIdx>()`.
+        // size_of::<Option<PageIdx>>()`.
         ptr.write_unaligned(None);
-        self.position_in_current_page = size_of::<PageIdx>();
+        self.position_in_current_page = size_of::<Option<PageIdx>>();
     }
 
     /// SAFETY: Only safe if consistent with the preceding header. I.e. either:
     /// 1) The preceding header `h` is followed by `h.len` objects. Then `object must be of type `Header`; or
     /// 2) The preceding header `h` is followed by fewer than `h.len` objects. Then `T` must have the ID `h.type_id`.
-    /// PANICS: Panics if `size_of::<PageIdx>() + size_of::<T>() > self.page_size`
+    /// PANICS: Panics if `size_of::<Option<PageIdx>>() + size_of::<T>() > self.page_size`
     unsafe fn add_object<T>(&mut self, object: T) -> Result<()> {
         if self.space_left_in_page() < size_of::<T>() {
             self.write_page()?;
@@ -177,13 +172,11 @@ pub struct Reader<'a> {
 }
 
 impl<'a> Reader<'a> {
-    /// PANICS: Panics if `first_page_idx` is `None`.
     pub fn new(first_page_idx: PageIdx, page_size: usize, allocated_reader: AllocatedReader<'a>) -> Self {
         Self {
-            current_page: allocated_reader
-                .cluster(&first_page_idx.expect("Reader initialized with empty StreamArchiver")),
+            current_page: allocated_reader.cluster(&first_page_idx),
             page_size,
-            position_in_current_page: size_of::<PageIdx>(),
+            position_in_current_page: size_of::<Option<PageIdx>>(),
             current_header: Header { len: 0, type_id: TypeId::of::<()>() },
             allocator: Rc::new(allocated_reader),
         }
@@ -236,9 +229,9 @@ impl<'a> Reader<'a> {
     /// PANICS: Panics if called after reaching the end of the archive.
     fn next_page(&mut self) {
         // SAFETY: Safe because every page begins with the next `PageIdx`.
-        let next_page_idx = unsafe { std::ptr::read_unaligned(self.current_page.as_ptr() as *const PageIdx) };
+        let next_page_idx = unsafe { std::ptr::read_unaligned(self.current_page.as_ptr() as *const Option<PageIdx>) };
         let next_page_idx = next_page_idx.expect("Attempted to read past StreamArchiver end");
         self.current_page = self.allocator.cluster(&next_page_idx);
-        self.position_in_current_page = size_of::<PageIdx>(); // skip next page index
+        self.position_in_current_page = size_of::<Option<PageIdx>>(); // skip next page index
     }
 }
