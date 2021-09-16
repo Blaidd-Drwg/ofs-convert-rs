@@ -45,6 +45,7 @@ impl<'a> StreamArchiver<'a> {
     }
 
     pub fn into_reader(mut self) -> Result<(Reader<'a>, Allocator<'a>)> {
+        self.finalize()?;
         self.write_page()?;
         let allocator = Rc::try_unwrap(self.allocator).expect(
             "StreamArchiver cannot take ownership of its allocator, somebody else still has a reference to it.",
@@ -67,6 +68,14 @@ impl<'a> StreamArchiver<'a> {
             }
         }
         Ok(())
+    }
+
+    /// Marks the end of the archive. A call to `Reader::next` attempting to access any objects beyond the end of the
+    /// archive will panic.
+    fn finalize(&mut self) -> Result<()> {
+        enum End {} // not accessible from outside this function, so a call attempting to read `header` will always panic
+        let header = Header { len: 0, type_id: TypeId::of::<End>() };
+        unsafe { self.add_object(header) }
     }
 
     fn previous_page_mut(&mut self) -> Option<&mut Page> {
@@ -180,7 +189,6 @@ impl<'a> Reader<'a> {
         }
     }
 
-    // TODO unsafe if reading past the last header!
     /// PANICS: Panics if called after reaching the end of the archive or if the next archived object is not of type
     /// `T`.
     pub fn next<T>(&mut self) -> Vec<T>
@@ -189,6 +197,7 @@ impl<'a> Reader<'a> {
         // `self.position_in_current_page` is a `Header`. This method is the only public way to mutate
         // `self.position_in_current_page`, and it ensures that when it returns, the object at
         // `self.position_in_current_page` is the next header.
+        // The archive's end is marked by a `Header` with an inaccessible type, so trying to read it will cause a panic.
         unsafe {
             self.read_header();
         }
