@@ -1,3 +1,5 @@
+use std::convert::TryFrom;
+
 use anyhow::Result;
 use chrono::prelude::*;
 use nix::unistd::{getegid, geteuid};
@@ -8,6 +10,8 @@ use crate::fat::{ClusterIdx, FatDentry};
 use crate::lohi::LoHiMut;
 
 pub const EXTENT_ENTRIES_IN_INODE: usize = 5;
+pub const EXT2_LINK_MAX: u16 = 65_000;
+pub const NON_REPRESENTABLE_LINK_COUNT: u16 = 1;
 
 // i_flags
 const INODE_USES_EXTENTS: u32 = 0x00080000;
@@ -87,12 +91,26 @@ impl<'a> Inode<'a> {
         LoHiMut::new(&mut self.inner.i_size_lo, &mut self.inner.i_size_high).set(size);
     }
 
-    pub fn increment_link_count(&mut self) {
-        self.inner.i_links_count += 1;
+    pub fn set_link_count_from_subdirs(&mut self, mut link_count: u64) {
+        link_count += u64::from(self.inner.i_links_count);
+        let representable_link_count = u16::try_from(link_count).ok().and_then(|link_count| {
+            if link_count <= EXT2_LINK_MAX {
+                Some(link_count)
+            } else {
+                None
+            }
+        });
+
+        if let Some(link_count) = representable_link_count {
+            self.inner.i_links_count = link_count;
+        } else {
+            debug_assert!(self.inner.is_dir());
+            self.inner.i_links_count = NON_REPRESENTABLE_LINK_COUNT;
+        }
     }
 
     pub fn add_extent(&mut self, extent: Extent, allocator: &Allocator<'_>) -> Result<Vec<ClusterIdx>> {
-        Ok(self.extent_tree(allocator).add_extent(extent)?)
+        self.extent_tree(allocator).add_extent(extent)
     }
 
     fn extent_tree<'b>(&'b mut self, allocator: &'b Allocator<'b>) -> ExtentTree<'b> {
@@ -163,5 +181,9 @@ impl InodeInner {
 
     fn init_extent_header(&mut self) {
         self.extents[0].header = ExtentHeader::new(EXTENT_ENTRIES_IN_INODE as u16);
+    }
+
+    fn is_dir(&self) -> bool {
+        self.i_mode & DIR_FLAG != 0
     }
 }

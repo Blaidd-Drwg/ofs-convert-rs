@@ -50,11 +50,11 @@ impl<'a> DeserializerInternals<'a> for Ext4TreeDeserializerInternals<'a> {
         &mut self,
         dentry: FatDentry,
         name: String,
-        parent_directory_writer: &mut DentryWriter<'a>,
+        parent_dentry_writer: &mut DentryWriter<'a>,
     ) -> Result<DentryWriter<'a>> {
-        let inode = self.build_file(dentry, name, parent_directory_writer)?;
+        let inode = self.build_file(dentry, name, parent_dentry_writer)?;
         let mut dentry_writer = DentryWriter::new(inode, Rc::clone(&self.allocator), &mut self.ext_fs)?;
-        self.build_dot_dirs(&mut parent_directory_writer.inode, &mut dentry_writer)?;
+        self.build_dot_dirs(&mut dentry_writer, parent_dentry_writer)?;
         Ok(dentry_writer)
     }
 
@@ -99,18 +99,22 @@ impl<'a> Ext4TreeDeserializerInternals<'a> {
 
         root_dentry_writer.add_dentry(dentry, &mut self.ext_fs)?;
         let mut dentry_writer = DentryWriter::new(inode, Rc::clone(&self.allocator), &mut self.ext_fs)?;
-        self.build_dot_dirs(&mut root_dentry_writer.inode, &mut dentry_writer)?;
+        self.build_dot_dirs(&mut dentry_writer, root_dentry_writer)?;
         Ok(())
     }
 
-    fn build_dot_dirs(&mut self, parent_inode: &mut Inode, dentry_writer: &mut DentryWriter) -> Result<()> {
+    fn build_dot_dirs(
+        &mut self,
+        dentry_writer: &mut DentryWriter,
+        parent_dentry_writer: &mut DentryWriter,
+    ) -> Result<()> {
         let dot_dentry = Ext4Dentry::new(dentry_writer.inode.inode_no, ".".to_string())?;
         dentry_writer.add_dentry(dot_dentry, &mut self.ext_fs)?;
-        dentry_writer.inode.increment_link_count();
+        dentry_writer.increment_link_count();
 
-        let dot_dot_dentry = Ext4Dentry::new(parent_inode.inode_no, "..".to_string())?;
+        let dot_dot_dentry = Ext4Dentry::new(parent_dentry_writer.inode.inode_no, "..".to_string())?;
         dentry_writer.add_dentry(dot_dot_dentry, &mut self.ext_fs)?;
-        parent_inode.increment_link_count();
+        parent_dentry_writer.increment_link_count();
         Ok(())
     }
 
@@ -118,11 +122,11 @@ impl<'a> Ext4TreeDeserializerInternals<'a> {
     fn build_root_dot_dirs(&mut self, dentry_writer: &mut DentryWriter) -> Result<()> {
         let dot_dentry = Ext4Dentry::new(dentry_writer.inode.inode_no, ".".to_string())?;
         dentry_writer.add_dentry(dot_dentry, &mut self.ext_fs)?;
-        dentry_writer.inode.increment_link_count();
+        dentry_writer.increment_link_count();
 
         let dot_dot_dentry = Ext4Dentry::new(dentry_writer.inode.inode_no, "..".to_string())?;
         dentry_writer.add_dentry(dot_dot_dentry, &mut self.ext_fs)?;
-        dentry_writer.inode.increment_link_count();
+        dentry_writer.increment_link_count();
         Ok(())
     }
 }
@@ -136,6 +140,7 @@ pub struct DentryWriter<'a> {
     block: AllocatedClusterIdx,
     previous_dentry: Option<&'a mut Ext4DentrySized>,
     block_count: usize,
+    link_count_from_subdirs: u64,
 }
 
 impl<'a> DentryWriter<'a> {
@@ -154,6 +159,7 @@ impl<'a> DentryWriter<'a> {
             block,
             previous_dentry: None,
             block_count: 1,
+            link_count_from_subdirs: 0,
         })
     }
 
@@ -178,6 +184,10 @@ impl<'a> DentryWriter<'a> {
         // SAFETY: It's the pointer we just wrote to, so it's valid, aligned and initialized.
         self.previous_dentry = unsafe { Some(&mut *dentry_ptr) };
         Ok(())
+    }
+
+    fn increment_link_count(&mut self) {
+        self.link_count_from_subdirs += 1;
     }
 
     fn remaining_space(&self) -> usize {
@@ -214,5 +224,7 @@ impl Drop for DentryWriter<'_> {
         if let Some(previous_dentry) = self.previous_dentry.as_mut() {
             previous_dentry.increment_dentry_len(remaining_space as u16);
         }
+
+        self.inode.set_link_count_from_subdirs(self.link_count_from_subdirs);
     }
 }
