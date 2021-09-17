@@ -72,8 +72,7 @@ impl BootSector {
     /// Returns the range in bytes of the data region, relative to the filesystem start
     pub fn get_data_range(&self) -> Range<usize> {
         let first_data_byte = self.first_data_sector() as usize * usize::from(self.bytes_per_sector);
-        let fs_size = usize::from(self.bytes_per_sector) * usize::try_from(self.sector_count()).unwrap();
-        first_data_byte..fs_size
+        first_data_byte..self.fs_size() as usize
     }
 
     fn first_data_sector(&self) -> u32 {

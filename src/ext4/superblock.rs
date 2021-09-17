@@ -21,6 +21,7 @@ const ERRORS_DEFAULT: u16 = 1;
 const FEATURE_COMPAT_SPARSE_SUPER2: u32 = 0x200; // use only two superblock backups
 const FEATURE_INCOMPAT_EXTENTS: u32 = 0x40; // use extents to represent a file's data blocks
 const FEATURE_INCOMPAT_64BIT: u32 = 0x80; // allow filesystems bigger with more than 2^32 blocks
+const FEATURE_INCOMPAT_LARGEDIR: u32 = 0x4000; // allow directories bigger than 2GB
 const FEATURE_RO_COMPAT_LARGE_FILES: u32 = 0x2; // allow files bigger than 2GiB
 const FEATURE_RO_COMPAT_DIR_NLINK: u32 = 0x20; // allow directories with more than 65000 subdirectories
 const INODE_RATIO: u32 = 16384;
@@ -178,7 +179,7 @@ impl SuperBlock {
         sb.s_magic = SUPERBLOCK_MAGIC;
         sb.s_state = STATE_CLEANLY_UNMOUNTED;
         sb.s_feature_compat = FEATURE_COMPAT_SPARSE_SUPER2;
-        sb.s_feature_incompat = FEATURE_INCOMPAT_64BIT | FEATURE_INCOMPAT_EXTENTS;
+        sb.s_feature_incompat = FEATURE_INCOMPAT_64BIT | FEATURE_INCOMPAT_EXTENTS | FEATURE_INCOMPAT_LARGEDIR;
         sb.s_feature_ro_compat = FEATURE_RO_COMPAT_LARGE_FILES | FEATURE_RO_COMPAT_DIR_NLINK;
         sb.s_desc_size = DESC_SIZE_64BIT;
         sb.s_inode_size = INODE_SIZE;
