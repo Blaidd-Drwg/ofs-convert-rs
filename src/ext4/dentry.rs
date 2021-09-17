@@ -2,6 +2,7 @@ use anyhow::{bail, Result};
 use num::Integer;
 
 const EXT4_NAME_MAX_LEN: usize = 255;
+const ALIGNMENT: usize = 4;
 
 pub struct Ext4Dentry {
     pub inner: Ext4DentrySized,
@@ -23,14 +24,15 @@ impl Ext4Dentry {
         if name.len() > EXT4_NAME_MAX_LEN {
             bail!("Length of file name '{}' exceeds 255 bytes", name);
         }
-        let dentry_len = next_multiple_of_four(name.len() + 8) as u16;
+        let dentry_len = aligned_length(name.len() + 8, ALIGNMENT) as u16;
         let inner = Ext4DentrySized { inode_no, dentry_len, name_len: name.len() as u16 };
         Ok(Self { inner, name })
     }
 
     pub fn serialize_name(&self) -> Vec<u8> {
         let mut bytes = self.name.as_bytes().to_vec();
-        bytes.push(0);
+        let new_len = aligned_length(bytes.len(), ALIGNMENT);
+        bytes.resize(new_len, 0);
         bytes
     }
 
@@ -46,6 +48,6 @@ impl Ext4DentrySized {
     }
 }
 
-fn next_multiple_of_four(n: usize) -> usize {
-    n.div_ceil(&4) * 4
+fn aligned_length(n: usize, alignment: usize) -> usize {
+    n.div_ceil(&alignment) * alignment
 }
