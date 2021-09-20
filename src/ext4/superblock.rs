@@ -1,7 +1,6 @@
 use std::convert::TryFrom;
 
 use anyhow::{bail, Result};
-use num::Integer;
 use uuid::Uuid;
 
 use crate::ext4::{FIRST_BLOCK_PADDING, FIRST_EXISTING_INODE, FIRST_NON_RESERVED_INODE};
@@ -226,7 +225,7 @@ impl SuperBlock {
         }
 
         // Same logic as in mke2fs
-        let block_group_count = data_block_count.div_ceil(&(u64::from(sb.s_blocks_per_group)));
+        let block_group_count = data_block_count.div_ceil(u64::from(sb.s_blocks_per_group));
         let block_group_count = u32::try_from(block_group_count).unwrap();
         sb.s_inodes_count = sb.s_inodes_per_group * block_group_count;
 
@@ -263,12 +262,12 @@ impl SuperBlock {
 
     fn gdt_block_count(&self) -> u64 {
         let descriptors_per_gdt_block = self.block_size() / u64::from(self.s_desc_size);
-        self.block_group_count().div_ceil(&descriptors_per_gdt_block)
+        self.block_group_count().div_ceil(descriptors_per_gdt_block)
     }
 
     pub fn inode_table_block_count(&self) -> u64 {
         let inode_table_size = u64::from(self.s_inodes_per_group) * u64::from(self.s_inode_size);
-        inode_table_size.div_ceil(&self.block_size())
+        inode_table_size.div_ceil(self.block_size())
     }
 
     pub fn block_size(&self) -> u64 {
@@ -285,7 +284,7 @@ impl SuperBlock {
     }
 
     pub fn block_group_count(&self) -> u64 {
-        self.block_count_without_padding().div_ceil(&u64::from(self.s_blocks_per_group))
+        self.block_count_without_padding().div_ceil(u64::from(self.s_blocks_per_group))
     }
 
     pub fn block_group_has_superblock(&self, block_group_idx: usize) -> HasSuperBlock {

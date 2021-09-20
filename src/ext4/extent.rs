@@ -3,7 +3,6 @@ use std::ops::Range;
 use std::slice;
 
 use anyhow::{bail, Result};
-use num::Integer;
 use static_assertions::const_assert_eq;
 
 use crate::allocator::{AllocatedClusterIdx, Allocator};
@@ -178,7 +177,7 @@ impl<'a> ExtentTree<'a> {
 
         let mut result = 0;
         for level in 1..level_count {
-            let blocks_in_level = extent_count.div_ceil(&extents_per_block.pow(level));
+            let blocks_in_level = extent_count.div_ceil(extents_per_block.pow(level));
             result += blocks_in_level;
         }
         result

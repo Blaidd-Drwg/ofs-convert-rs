@@ -1,5 +1,4 @@
 use anyhow::{bail, Result};
-use num::Integer;
 
 const EXT4_NAME_MAX_LEN: usize = 255;
 const ALIGNMENT: usize = 4;
@@ -49,5 +48,5 @@ impl Ext4DentrySized {
 }
 
 fn aligned_length(n: usize, alignment: usize) -> usize {
-    n.div_ceil(&alignment) * alignment
+    n.next_multiple_of(alignment)
 }

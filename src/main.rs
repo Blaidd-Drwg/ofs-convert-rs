@@ -1,5 +1,6 @@
 #![feature(step_trait)]
 #![feature(iter_advance_by)]
+#![feature(int_roundings)]
 
 mod allocator;
 mod bitmap;
