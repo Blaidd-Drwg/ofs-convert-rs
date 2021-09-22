@@ -6,7 +6,7 @@ use std::rc::Rc;
 use anyhow::Result;
 
 use crate::allocator::{AllocatedClusterIdx, Allocator};
-use crate::ext4::{Ext4Dentry, Ext4DentrySized, Ext4Fs, Extent, Inode, SuperBlock};
+use crate::ext4::{BlockIdx_from, Ext4Dentry, Ext4DentrySized, Ext4Fs, Extent, Inode, SuperBlock};
 use crate::fat::{ClusterIdx, FatDentry, FatFs};
 use crate::serialization::{Deserializer, DeserializerInternals, DirectoryWriter, DryRunDeserializer, Reader};
 
@@ -66,7 +66,10 @@ impl<'a> DeserializerInternals<'a> for Ext4TreeDeserializerInternals<'a> {
         parent_directory_writer: &mut DentryWriter,
     ) -> Result<()> {
         let mut inode = self.build_file(dentry, name, parent_directory_writer)?;
-        self.ext_fs.set_extents(&mut inode, extents, &self.allocator)?;
+        let extent_iter = extents
+            .into_iter()
+            .map(|range| BlockIdx_from(range.start)..BlockIdx_from(range.end));
+        self.ext_fs.set_extents(&mut inode, extent_iter, &self.allocator)?;
         inode.set_size(dentry.file_size as u64);
         Ok(())
     }
@@ -146,7 +149,7 @@ pub struct DentryWriter<'a> {
 impl<'a> DentryWriter<'a> {
     pub fn new(mut inode: Inode<'a>, allocator: Rc<Allocator<'a>>, ext_fs: &mut Ext4Fs) -> Result<Self> {
         let block = allocator.allocate_one()?;
-        let extent = Extent::new(block.as_cluster_idx()..block.as_cluster_idx() + 1, 0);
+        let extent = Extent::new(block.as_block_idx()..block.as_block_idx() + 1, 0);
         ext_fs.register_extent(&mut inode, extent, &allocator)?;
         inode.increment_size(allocator.block_size() as u64);
 
@@ -207,7 +210,7 @@ impl<'a> DentryWriter<'a> {
         self.previous_dentry = None;
 
         let extent = Extent::new(
-            self.block.as_cluster_idx()..self.block.as_cluster_idx() + 1,
+            self.block.as_block_idx()..self.block.as_block_idx() + 1,
             self.block_count as u32 - 1,
         );
         ext_fs.register_extent(&mut self.inode, extent, &self.allocator)?;

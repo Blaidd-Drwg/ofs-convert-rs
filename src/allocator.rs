@@ -1,3 +1,5 @@
+use crate::ext4::BlockIdx_from;
+use crate::ext4::BlockIdx;
 use std::cell::Cell;
 use std::fmt::{Display, Formatter};
 use std::marker::PhantomData;
@@ -32,6 +34,11 @@ impl AllocatedClusterIdx {
     /// SAFETY: This is safe since it cannot be converted back to an `AllocatedClusterIdx` or to a `DataClusterIdx`.
     pub fn as_cluster_idx(&self) -> ClusterIdx {
         self.0
+    }
+
+    /// SAFETY: This is safe since it cannot be converted back to an `AllocatedClusterIdx` or to a `DataClusterIdx`.
+    pub fn as_block_idx(&self) -> BlockIdx {
+        BlockIdx_from(self.0)
     }
 }
 

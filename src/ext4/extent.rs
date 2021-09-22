@@ -5,9 +5,12 @@ use std::slice;
 use anyhow::{bail, Result};
 use static_assertions::const_assert_eq;
 
+use super::BlockIdx;
 use crate::allocator::{AllocatedClusterIdx, Allocator};
 use crate::ext4::EXTENT_ENTRIES_IN_INODE;
 use crate::fat::ClusterIdx;
+use crate::lohi::LoHiMut;
+use crate::util::u64_from;
 
 const_assert_eq!(size_of::<Extent>(), size_of::<ExtentTreeElement>());
 const_assert_eq!(size_of::<ExtentHeader>(), size_of::<ExtentTreeElement>());
@@ -54,14 +57,15 @@ pub struct ExtentHeader {
 }
 
 impl Extent {
-    pub fn new(range: Range<ClusterIdx>, logical_start: u32) -> Self {
-        Self {
+    pub fn new(range: Range<BlockIdx>, logical_start: u32) -> Self {
+        let mut instance = Self {
             logical_start,
             len: range.len() as u16,
-            physical_start_hi: 0, /* FAT uses 32 bits to address sectors, so there can't be a block with a higher
-                                   * address */
-            physical_start_lo: range.start,
-        }
+            physical_start_hi: 0,
+            physical_start_lo: 0,
+        };
+        LoHiMut::new(&mut instance.physical_start_lo, &mut instance.physical_start_hi).set(u64_from(range.start));
+        instance
     }
 
     pub fn start(&self) -> u32 {

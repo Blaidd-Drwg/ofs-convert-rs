@@ -1,14 +1,16 @@
+use std::convert::TryFrom;
 use std::ops::Range;
 
-use anyhow::Result;
+use anyhow::{bail, Context, Result};
 use num::Integer;
 
 use crate::allocator::Allocator;
 use crate::ext4::{
-    BlockGroup, Ext4BlockGroupConstructionInfo, Ext4GroupDescriptor, Extent, Inode, SuperBlock, FIRST_EXISTING_INODE,
-    FIRST_NON_RESERVED_INODE, LOST_FOUND_INODE_NO, ROOT_INODE_NO,
+    BlockGroup, BlockIdx, Ext4BlockGroupConstructionInfo, Ext4GroupDescriptor, Extent, Inode, SuperBlock,
+    FIRST_EXISTING_INODE, FIRST_NON_RESERVED_INODE, LOST_FOUND_INODE_NO, ROOT_INODE_NO,
 };
 use crate::fat::{BootSector, ClusterIdx};
+use crate::util::checked_add;
 
 pub struct Ext4Fs<'a> {
     block_groups: Vec<BlockGroup<'a>>,
@@ -69,31 +71,30 @@ impl<'a> Ext4Fs<'a> {
     }
 
     /// Assumes that `inode` currently has no extents.
-    pub fn set_extents(
-        &mut self,
-        inode: &mut Inode,
-        ranges: Vec<Range<ClusterIdx>>,
-        allocator: &Allocator<'_>,
-    ) -> Result<()> {
-        for extent in Self::ranges_to_extents(&ranges) {
+    pub fn set_extents<I>(&mut self, inode: &mut Inode, ranges: I, allocator: &Allocator<'_>) -> Result<()>
+    where I: IntoIterator<Item = Range<BlockIdx>> {
+        for extent in Self::ranges_to_extents(ranges)? {
             self.register_extent(inode, extent, allocator)?;
         }
         Ok(())
     }
 
-    pub fn ranges_to_extents(ranges: &[Range<ClusterIdx>]) -> Vec<Extent> {
-        let mut logical_start = 0;
+    // TODO fail dry run when file has more than u32::max blocks
+    pub fn ranges_to_extents<I>(ranges: I) -> Result<Vec<Extent>>
+    where I: IntoIterator<Item = Range<BlockIdx>> {
+        let mut logical_start = 0u32;
         let mut extents = Vec::new();
-        for mut range in ranges.iter().cloned() {
+        for mut range in ranges {
             while !range.is_empty() {
                 let range_len = range.len().min(Extent::max_len());
-                let range_first_part = range.start..range.start + range_len as ClusterIdx;
+                let range_first_part = range.start..range.start + range_len;
                 extents.push(Extent::new(range_first_part, logical_start));
-                logical_start += range_len as u32;
-                range.start += range_len as u32;
+                logical_start = checked_add(logical_start, range_len)
+                    .context("The size of a file's extents cannot sum up to more than 2^32 blocks")?;
+                range.start += range_len;
             }
         }
-        extents
+        Ok(extents)
     }
 
     pub fn register_extent(&mut self, inode: &mut Inode, extent: Extent, allocator: &Allocator) -> Result<()> {
