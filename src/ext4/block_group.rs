@@ -3,10 +3,9 @@ use std::slice;
 
 use crate::bitmap::Bitmap;
 use crate::ext4::{
-    Ext4GroupDescriptor, HasSuperBlock, InodeInner, SuperBlock, FIRST_BLOCK_PADDING, FIRST_EXISTING_INODE,
+    BlockIdx, Ext4GroupDescriptor, HasSuperBlock, InodeInner, SuperBlock, FIRST_BLOCK_PADDING, FIRST_EXISTING_INODE,
     FIRST_NON_RESERVED_INODE,
 };
-use crate::fat::ClusterIdx;
 
 pub struct BlockGroup<'a> {
     pub superblock: Option<&'a mut SuperBlock>,
@@ -108,10 +107,10 @@ impl<'a> BlockGroup<'a> {
         (table.as_mut_ptr(), table.len())
     }
 
-    pub fn mark_relative_range_as_used(&mut self, relative_range: Range<ClusterIdx>) {
+    pub fn mark_relative_range_as_used(&mut self, relative_range: Range<BlockIdx>) {
         let mut bitmap = Bitmap { data: self.data_block_bitmap };
         for block_idx in relative_range {
-            bitmap.set(block_idx as usize);
+            bitmap.set(block_idx);
         }
     }
 
@@ -168,7 +167,7 @@ impl Ext4BlockGroupConstructionInfo {
         let blocks_count = max_block_count.min(superblock.s_blocks_per_group as usize);
 
         Self {
-            start_block: superblock.block_group_start_cluster(block_group_idx) as u64,
+            start_block: superblock.block_group_start_block(block_group_idx) as u64,
             relative_group_descriptor_start_block: 1,
             relative_block_bitmap_block,
             relative_inode_bitmap_block,

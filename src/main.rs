@@ -12,6 +12,7 @@ mod ranges;
 mod serialization;
 mod util;
 
+use std::convert::TryFrom;
 use std::io::{self, Write};
 use std::mem::size_of;
 use std::process::Command;
@@ -21,9 +22,10 @@ use clap::{App, Arg};
 use static_assertions::const_assert;
 use text_io::try_read;
 
-use crate::ext4::SuperBlock;
-use crate::fat::FatFs;
+use crate::ext4::{BlockIdx, SuperBlock};
+use crate::fat::{ClusterIdx, FatFs};
 use crate::partition::Partition;
+use crate::ranges::Ranges;
 use crate::serialization::FatTreeSerializer;
 
 const_assert!(size_of::<usize>() >= size_of::<u32>());
@@ -91,8 +93,10 @@ unsafe fn ofs_convert(partition_path: &str) -> Result<()> {
         FatFs::new_with_allocator(partition.as_mut_ptr(), partition.len(), partition.lifetime)?;
     let boot_sector = fat_fs.boot_sector();
     let superblock = SuperBlock::from(boot_sector)?;
-    let mut forbidden_ranges = superblock.block_group_overhead_ranges();
-    let overhanging_block_range = superblock.block_count_with_padding() as u32..fat_fs.cluster_count();
+
+    let forbidden_ranges = superblock.block_group_overhead_ranges();
+    let mut forbidden_ranges = into_cluster_idx_ranges(forbidden_ranges);
+    let overhanging_block_range = superblock.block_count_with_padding() as ClusterIdx..fat_fs.cluster_count();
     forbidden_ranges.insert(overhanging_block_range);
     for range in &forbidden_ranges {
         allocator.forbid(range.clone());
@@ -108,4 +112,15 @@ unsafe fn ofs_convert(partition_path: &str) -> Result<()> {
     deserializer.deserialize_directory_tree().context("Conversion failed")?;
 
     Ok(())
+}
+
+fn into_cluster_idx_ranges(ranges: Ranges<BlockIdx>) -> Ranges<ClusterIdx> {
+    ranges
+        .into_iter()
+        .map(|range| {
+            ClusterIdx::try_from(range.start)
+                .expect("There are at most as many ext4 blocks as FAT32 clusters, so the indices fit into a u32")
+                ..ClusterIdx::try_from(range.end).unwrap()
+        })
+        .collect()
 }

@@ -1,3 +1,4 @@
+use std::convert::TryFrom;
 use std::mem::size_of;
 use std::ops::Range;
 use std::slice;
@@ -8,8 +9,7 @@ use static_assertions::const_assert_eq;
 use super::BlockIdx;
 use crate::allocator::{AllocatedClusterIdx, Allocator};
 use crate::ext4::EXTENT_ENTRIES_IN_INODE;
-use crate::fat::ClusterIdx;
-use crate::lohi::LoHiMut;
+use crate::lohi::{LoHi, LoHiMut};
 use crate::util::u64_from;
 
 const_assert_eq!(size_of::<Extent>(), size_of::<ExtentTreeElement>());
@@ -68,16 +68,17 @@ impl Extent {
         instance
     }
 
-    pub fn start(&self) -> u32 {
-        self.physical_start_lo
+    pub fn start(&self) -> BlockIdx {
+        let start: u64 = LoHi::new(&self.physical_start_lo, &self.physical_start_hi).get();
+        BlockIdx::try_from(start).expect("Start was originally a BlockIdx")
     }
 
-    pub fn end(&self) -> u32 {
-        self.start() + self.len as u32
+    pub fn end(&self) -> BlockIdx {
+        self.start() + BlockIdx::from(self.len)
     }
 
-    pub fn as_range(&self) -> Range<ClusterIdx> {
-        self.start() as ClusterIdx..self.end() as ClusterIdx
+    pub fn as_range(&self) -> Range<BlockIdx> {
+        self.start()..self.end()
     }
 
     pub const fn max_len() -> usize {
@@ -101,8 +102,8 @@ impl ExtentIdx {
         // SAFETY: Safe since `self.leaf_lo` came from an `AllocatedClusterIdx`, and since it only survives as long as
         // we have a mutable borrow on `self`, ensuring it cannot be duplicated.
         let mut allocated_cluster_idx = AllocatedClusterIdx::new(self.leaf_lo);
-        let cluster = allocator.cluster_mut(&mut allocated_cluster_idx);
-        let (_, entries, _) = cluster.align_to_mut::<ExtentTreeElement>();
+        let block = allocator.cluster_mut(&mut allocated_cluster_idx);
+        let (_, entries, _) = block.align_to_mut::<ExtentTreeElement>();
         ExtentTreeLevel::new(entries)
     }
 }
@@ -187,7 +188,7 @@ impl<'a> ExtentTree<'a> {
         result
     }
 
-    pub fn add_extent(&mut self, extent: Extent) -> Result<Vec<ClusterIdx>> {
+    pub fn add_extent(&mut self, extent: Extent) -> Result<Vec<BlockIdx>> {
         match self.root.add_extent(extent, self.allocator) {
             Ok(allocated_blocks) => Ok(allocated_blocks),
             Err(_) => {
@@ -202,9 +203,9 @@ impl<'a> ExtentTree<'a> {
         }
     }
 
-    fn make_deeper(&mut self) -> Result<ClusterIdx> {
+    fn make_deeper(&mut self) -> Result<BlockIdx> {
         let mut new_block_idx = self.allocator.allocate_one()?;
-        let cluster_idx = new_block_idx.as_cluster_idx();
+        let block_idx = new_block_idx.as_block_idx();
         let new_block = self.allocator.cluster_mut(&mut new_block_idx);
         // SAFETY: Safe since we later overwrite the first `root_slice.len()` entries and mark all others as invalid
         let (_, new_entries, _) = unsafe { new_block.align_to_mut::<ExtentTreeElement>() };
@@ -218,7 +219,7 @@ impl<'a> ExtentTree<'a> {
         self.root
             .append_extent_idx(ExtentIdx::new(0, new_block_idx))
             .expect("Unable to add ExtentIdx within the inode");
-        Ok(cluster_idx)
+        Ok(block_idx)
     }
 }
 
@@ -249,9 +250,9 @@ impl<'a> ExtentTreeLevel<'a> {
         }
     }
 
-    /// Returns the `ClusterIdx`s of the extent tree blocks allocated for this operation, or None if the tree below
+    /// Returns the `BlockIdx`s of the extent tree blocks allocated for this operation, or None if the tree below
     /// `self` is already full.
-    pub fn add_extent(&mut self, extent: Extent, allocator: &Allocator<'a>) -> Result<Vec<ClusterIdx>> {
+    pub fn add_extent(&mut self, extent: Extent, allocator: &Allocator<'a>) -> Result<Vec<BlockIdx>> {
         // try to append directly to self
         if self.header.is_leaf() {
             // if this did not work, there is nothing we as a leaf can do about it
@@ -288,8 +289,8 @@ impl<'a> ExtentTreeLevel<'a> {
         }
     }
 
-    /// Returns the `ClusterIdx`s of the extent tree blocks allocated for this operation.
-    fn add_extent_with_new_leaf(&mut self, extent: Extent, allocator: &Allocator<'_>) -> Result<Vec<ClusterIdx>> {
+    /// Returns the `BlockIdx`s of the extent tree blocks allocated for this operation.
+    fn add_extent_with_new_leaf(&mut self, extent: Extent, allocator: &Allocator<'_>) -> Result<Vec<BlockIdx>> {
         let allocated_block = self.add_child_level(extent.logical_start, allocator)?;
         let mut child_level = self.last_child_level(allocator);
         if child_level.header.is_leaf() {
@@ -306,15 +307,15 @@ impl<'a> ExtentTreeLevel<'a> {
         }
     }
 
-    /// Returns the `ClusterIdx` of the block allocated for the new child level, or None if no child level can be added
+    /// Returns the `BlockIdx` of the block allocated for the new child level, or None if no child level can be added
     /// because `self` is full.
-    fn add_child_level(&mut self, logical_start: u32, allocator: &Allocator<'_>) -> Result<ClusterIdx> {
+    fn add_child_level(&mut self, logical_start: u32, allocator: &Allocator<'_>) -> Result<BlockIdx> {
         if self.header.is_full() {
             bail!("Extent tree level full, cannot add new child level");
         }
 
         let mut new_child_block_idx = allocator.allocate_one()?;
-        let cluster_idx = new_child_block_idx.as_cluster_idx();
+        let block_idx = new_child_block_idx.as_block_idx();
         let new_child_block = allocator.cluster_mut(&mut new_child_block_idx);
         // SAFETY: Safe because we replace the header and regard all other entries as invalid.
         let (_, entries, _) = unsafe { new_child_block.align_to_mut::<ExtentTreeElement>() };
@@ -322,7 +323,7 @@ impl<'a> ExtentTreeLevel<'a> {
         entries[0].header = ExtentHeader::from_parent(*self.header, entries.len() as u16);
 
         self.append_extent_idx(ExtentIdx::new(logical_start, new_child_block_idx))
-            .and(Ok(cluster_idx))
+            .and(Ok(block_idx))
     }
 
     /// PANICS: Panics if `self` is not a leaf level

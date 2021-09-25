@@ -1,4 +1,4 @@
-use std::iter::IntoIterator;
+use std::iter::{FromIterator, IntoIterator};
 use std::ops::Range;
 
 
@@ -139,6 +139,17 @@ impl<'a, Idx: Ord + Copy> IntoIterator for &'a Ranges<Idx> {
     type IntoIter = std::slice::Iter<'a, Range<Idx>>;
     fn into_iter(self) -> Self::IntoIter {
         (&self.ranges).iter()
+    }
+}
+
+impl<'a, Idx: Ord + Copy> FromIterator<Range<Idx>> for Ranges<Idx> {
+    fn from_iter<T>(iter: T) -> Self
+    where T: IntoIterator<Item = Range<Idx>> {
+        let mut instance = Self::new();
+        for range in iter {
+            instance.insert(range);
+        }
+        instance
     }
 }
 

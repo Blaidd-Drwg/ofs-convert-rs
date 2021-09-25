@@ -1,16 +1,15 @@
-use std::convert::TryFrom;
 use std::ops::Range;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use num::Integer;
 
 use crate::allocator::Allocator;
 use crate::ext4::{
-    BlockGroup, BlockIdx, Ext4BlockGroupConstructionInfo, Ext4GroupDescriptor, Extent, Inode, SuperBlock,
-    FIRST_EXISTING_INODE, FIRST_NON_RESERVED_INODE, LOST_FOUND_INODE_NO, ROOT_INODE_NO,
+    BlockGroup, BlockIdx, BlockIdx_from, Ext4BlockGroupConstructionInfo, Ext4GroupDescriptor, Extent, Inode,
+    SuperBlock, FIRST_EXISTING_INODE, FIRST_NON_RESERVED_INODE, LOST_FOUND_INODE_NO, ROOT_INODE_NO,
 };
-use crate::fat::{BootSector, ClusterIdx};
-use crate::util::checked_add;
+use crate::fat::BootSector;
+use crate::util::{checked_add, usize_from};
 
 pub struct Ext4Fs<'a> {
     block_groups: Vec<BlockGroup<'a>>,
@@ -107,13 +106,13 @@ impl<'a> Ext4Fs<'a> {
         Ok(())
     }
 
-    pub fn block_group_idx_of_block(&self, block_idx: ClusterIdx) -> usize {
+    pub fn block_group_idx_of_block(&self, block_idx: BlockIdx) -> usize {
         // any block before `s_first_data_block` doesn't belong to any block group
-        let data_block_idx = block_idx - self.superblock().s_first_data_block;
-        (data_block_idx / self.superblock().s_blocks_per_group) as usize
+        let data_block_idx = block_idx - BlockIdx_from(self.superblock().s_first_data_block);
+        data_block_idx / usize_from(self.superblock().s_blocks_per_group)
     }
 
-    pub fn mark_range_as_used(&mut self, inode: &mut Inode, range: Range<ClusterIdx>) {
+    pub fn mark_range_as_used(&mut self, inode: &mut Inode, range: Range<BlockIdx>) {
         inode.increment_used_blocks(range.len(), self.superblock().block_size() as usize);
 
         let block_group_idx = self.block_group_idx_of_block(range.start);
@@ -121,7 +120,7 @@ impl<'a> Ext4Fs<'a> {
 
         self.group_descriptor_table_mut()[block_group_idx].decrement_free_blocks_count(range.len() as u32);
 
-        let group_start_block = self.superblock_mut().block_group_start_cluster(block_group_idx);
+        let group_start_block = self.superblock_mut().block_group_start_block(block_group_idx);
         let relative_range = range.start - group_start_block..range.end - group_start_block;
         self.block_groups[block_group_idx].mark_relative_range_as_used(relative_range);
     }

@@ -1,5 +1,3 @@
-use crate::ext4::BlockIdx_from;
-use crate::ext4::BlockIdx;
 use std::cell::Cell;
 use std::fmt::{Display, Formatter};
 use std::marker::PhantomData;
@@ -8,6 +6,7 @@ use std::slice;
 
 use anyhow::{bail, Result};
 
+use crate::ext4::{BlockIdx, BlockIdx_from};
 use crate::fat::ClusterIdx;
 use crate::ranges::{NotCoveredRange, Ranges};
 

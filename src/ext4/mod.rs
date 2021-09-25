@@ -25,6 +25,7 @@ pub const FIRST_NON_RESERVED_INODE: u32 = 11;
 
 // TODO blockidx newtype?
 pub type BlockIdx = usize;
+#[allow(non_snake_case)]
 pub fn BlockIdx_from(n: u32) -> BlockIdx {
     usize_from(n)
 }

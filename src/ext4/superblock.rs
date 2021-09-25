@@ -3,10 +3,11 @@ use std::convert::TryFrom;
 use anyhow::{bail, Result};
 use uuid::Uuid;
 
-use crate::ext4::{FIRST_BLOCK_PADDING, FIRST_EXISTING_INODE, FIRST_NON_RESERVED_INODE};
-use crate::fat::{BootSector, ClusterIdx};
+use crate::ext4::{BlockIdx, BlockIdx_from, FIRST_BLOCK_PADDING, FIRST_EXISTING_INODE, FIRST_NON_RESERVED_INODE};
+use crate::fat::BootSector;
 use crate::lohi::{LoHi, LoHiMut};
 use crate::ranges::Ranges;
+use crate::util::usize_from;
 
 pub const ROOT_INODE_NO: u32 = 2;
 pub const LOST_FOUND_INODE_NO: u32 = 11;
@@ -26,7 +27,7 @@ const FEATURE_RO_COMPAT_DIR_NLINK: u32 = 0x20; // allow directories with more th
 const INODE_RATIO: u32 = 16384;
 const INODE_SIZE: u16 = 256;
 const VOLUME_NAME_LEN: usize = 16;
-// Simplified because we don't use clusters
+// Simplified because we don't use ext4 clusters
 const MAX_BLOCKS_PER_GROUP: u32 = (1 << 16) - 8;
 // Chosen for practicality, not actually enforced
 const MIN_USABLE_BLOCKS_PER_GROUP: u64 = 10;
@@ -297,13 +298,17 @@ impl SuperBlock {
         }
     }
 
+    pub fn first_data_block(&self) -> BlockIdx {
+        BlockIdx_from(self.s_first_data_block)
+    }
+
     // if the block size is FIRST_BLOCK_PADDING, every block group begins one block later than normal
-    pub fn block_group_start_cluster(&self, block_group_idx: usize) -> ClusterIdx {
-        self.s_blocks_per_group * block_group_idx as u32 + self.s_first_data_block
+    pub fn block_group_start_block(&self, block_group_idx: usize) -> BlockIdx {
+        usize_from(self.s_blocks_per_group) * block_group_idx + self.first_data_block()
     }
 
     /// Returns the block ranges that contain filesystem metadata, i.e. the ones occupied by the fields of `BlockGroup`.
-    pub fn block_group_overhead_ranges(&self) -> Ranges<ClusterIdx> {
+    pub fn block_group_overhead_ranges(&self) -> Ranges<BlockIdx> {
         let mut overhead_ranges = Vec::new();
         if self.block_size() <= FIRST_BLOCK_PADDING as u64 {
             // the entire first block is padding
@@ -314,8 +319,8 @@ impl SuperBlock {
             let has_sb_copy = self.block_group_has_superblock(block_group_idx);
             let overhead = self.block_group_overhead(has_sb_copy);
 
-            let start_cluster_idx = self.block_group_start_cluster(block_group_idx);
-            start_cluster_idx..start_cluster_idx + u32::try_from(overhead).unwrap()
+            let start_block_idx = self.block_group_start_block(block_group_idx);
+            start_block_idx..start_block_idx + usize::try_from(overhead).unwrap()
         });
         overhead_ranges.extend(block_group_overhead_ranges);
         Ranges::from(overhead_ranges)

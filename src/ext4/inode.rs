@@ -5,8 +5,8 @@ use chrono::prelude::*;
 use nix::unistd::{getegid, geteuid};
 
 use crate::allocator::Allocator;
-use crate::ext4::{Extent, ExtentHeader, ExtentTree, ExtentTreeElement, ExtentTreeLevel};
-use crate::fat::{ClusterIdx, FatDentry};
+use crate::ext4::{BlockIdx, Extent, ExtentHeader, ExtentTree, ExtentTreeElement, ExtentTreeLevel};
+use crate::fat::FatDentry;
 use crate::lohi::LoHiMut;
 
 pub const EXTENT_ENTRIES_IN_INODE: usize = 5;
@@ -109,7 +109,7 @@ impl<'a> Inode<'a> {
         }
     }
 
-    pub fn add_extent(&mut self, extent: Extent, allocator: &Allocator<'_>) -> Result<Vec<ClusterIdx>> {
+    pub fn add_extent(&mut self, extent: Extent, allocator: &Allocator<'_>) -> Result<Vec<BlockIdx>> {
         self.extent_tree(allocator).add_extent(extent)
     }
 
