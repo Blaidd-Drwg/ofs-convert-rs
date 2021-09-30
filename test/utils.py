@@ -112,6 +112,7 @@ class ImageMounter:
             args = ['mount', '-o', 'loop', '-t', fs_type.name.lower()]
             if fs_type == FsType.VFAT:
                 args += ['-o', 'utf8']
+                args += ['-o', 'tz=UTC']
             if readonly:
                 args.append('--read-only')
             args.extend([str(image_path), str(mount_point)])

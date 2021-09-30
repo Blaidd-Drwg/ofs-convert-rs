@@ -28,6 +28,7 @@ use crate::serialization::FatTreeSerializer;
 
 const_assert!(size_of::<usize>() >= size_of::<u32>());
 
+// TODO how does Ubuntu FAT driver handle timezones?
 // TODO allow manually increasing number of inodes
 // TODO sometimes using Result where Option would be more idiomatic
 // TODO add context to Errs
