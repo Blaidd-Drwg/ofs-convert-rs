@@ -3,14 +3,14 @@ use std::mem::size_of;
 use std::ops::Range;
 use std::slice;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use static_assertions::const_assert_eq;
 
 use super::BlockIdx;
 use crate::allocator::{AllocatedClusterIdx, Allocator};
 use crate::ext4::EXTENT_ENTRIES_IN_INODE;
 use crate::lohi::{LoHi, LoHiMut};
-use crate::util::u64_from;
+use crate::util::{checked_add, u64_from, usize_from};
 
 const_assert_eq!(size_of::<Extent>(), size_of::<ExtentTreeElement>());
 const_assert_eq!(size_of::<ExtentHeader>(), size_of::<ExtentTreeElement>());
@@ -18,6 +18,7 @@ const_assert_eq!(size_of::<ExtentIdx>(), size_of::<ExtentTreeElement>());
 
 const EXTENT_TREE_LEAF_DEPTH: u16 = 0;
 const EXTENT_MAGIC: u16 = 0xF30A;
+const MAX_EXTENT_ENTRIES_PER_BLOCK: usize = u16::MAX as usize; // must fit into `ExtentHeader.max_entry_count`
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -57,10 +58,13 @@ pub struct ExtentHeader {
 }
 
 impl Extent {
+    pub const MAX_LEN: usize = u16::MAX as usize;
+
+    /// PANICS: Panics if `range.len() > Extent::MAX_LEN`.
     pub fn new(range: Range<BlockIdx>, logical_start: u32) -> Self {
         let mut instance = Self {
             logical_start,
-            len: range.len() as u16,
+            len: u16::try_from(range.len()).expect("Attempted to create an extent longer than 65535 blocks"),
             physical_start_hi: 0,
             physical_start_lo: 0,
         };
@@ -81,8 +85,22 @@ impl Extent {
         self.start()..self.end()
     }
 
-    pub const fn max_len() -> usize {
-        u16::MAX as usize
+    // TODO fail dry run when file has more than u32::max blocks
+    pub fn from_ranges<I>(ranges: I) -> Result<Vec<Self>>
+    where I: IntoIterator<Item = Range<BlockIdx>> {
+        let mut logical_start = 0u32;
+        let mut extents = Vec::new();
+        for mut range in ranges {
+            while !range.is_empty() {
+                let range_len = range.len().min(Self::MAX_LEN);
+                let range_first_part = range.start..range.start + range_len;
+                extents.push(Self::new(range_first_part, logical_start));
+                logical_start = checked_add(logical_start, range_len)
+                    .context("The size of a file's extents cannot sum up to more than 2^32 blocks")?;
+                range.start += range_len;
+            }
+        }
+        Ok(extents)
     }
 }
 
@@ -169,12 +187,12 @@ impl<'a> ExtentTree<'a> {
         Self { root: root_level, allocator }
     }
 
-    pub fn required_block_count(extent_count: usize, block_size: usize) -> usize {
+    pub fn required_block_count(extent_count: usize, block_size: u32) -> usize {
         if extent_count == 0 {
             return 0;
         }
 
-        let extents_per_block = block_size / size_of::<ExtentTreeElement>();
+        let extents_per_block = usize_from(block_size) / size_of::<ExtentTreeElement>();
         let level_count = 1
             + (extent_count as f64 / (EXTENT_ENTRIES_IN_INODE - 1) as f64)
                 .log(extents_per_block as f64)
@@ -208,14 +226,16 @@ impl<'a> ExtentTree<'a> {
         let block_idx = new_block_idx.as_block_idx();
         let new_block = self.allocator.cluster_mut(&mut new_block_idx);
         // SAFETY: Safe since we later overwrite the first `root_slice.len()` entries and mark all others as invalid
-        let (_, new_entries, _) = unsafe { new_block.align_to_mut::<ExtentTreeElement>() };
-        assert!(new_entries.len() >= EXTENT_ENTRIES_IN_INODE);
-        self.root.header.max_entry_count = (new_entries.len() - 1) as u16;
+        let (_, mut new_entries, _) = unsafe { new_block.align_to_mut::<ExtentTreeElement>() };
+        let entry_count = new_entries.len().min(MAX_EXTENT_ENTRIES_PER_BLOCK);
+        new_entries = &mut new_entries[..entry_count];
+        assert!(entry_count >= usize::from(EXTENT_ENTRIES_IN_INODE));
+        self.root.header.max_entry_count = u16::try_from(entry_count - 1).unwrap();
 
         let root_slice = self.root.as_slice();
         new_entries[..root_slice.len()].copy_from_slice(root_slice);
 
-        *self.root.header = ExtentHeader::from_child(*self.root.header, EXTENT_ENTRIES_IN_INODE as u16);
+        *self.root.header = ExtentHeader::from_child(*self.root.header, EXTENT_ENTRIES_IN_INODE);
         self.root
             .append_extent_idx(ExtentIdx::new(0, new_block_idx))
             .expect("Unable to add ExtentIdx within the inode");
@@ -237,7 +257,7 @@ impl<'a> ExtentTreeLevel<'a> {
         let (header_slice, used_entries) = entries.split_at_mut(1);
         let header = &mut header_slice[0].header;
         assert!(header.is_valid());
-        assert_eq!(header.max_entry_count as usize, used_entries.len());
+        assert_eq!(usize::from(header.max_entry_count), used_entries.len());
 
         Self { header, all_entries: used_entries }
     }
@@ -269,7 +289,7 @@ impl<'a> ExtentTreeLevel<'a> {
     }
 
     fn valid_entries_mut(&mut self) -> &mut [ExtentTreeElement] {
-        &mut self.all_entries[..self.header.valid_entry_count as usize]
+        &mut self.all_entries[..usize::from(self.header.valid_entry_count)]
     }
 
     /// PANICS: Panics if `self` is a leaf level.
@@ -318,9 +338,11 @@ impl<'a> ExtentTreeLevel<'a> {
         let block_idx = new_child_block_idx.as_block_idx();
         let new_child_block = allocator.cluster_mut(&mut new_child_block_idx);
         // SAFETY: Safe because we replace the header and regard all other entries as invalid.
-        let (_, entries, _) = unsafe { new_child_block.align_to_mut::<ExtentTreeElement>() };
+        let (_, mut entries, _) = unsafe { new_child_block.align_to_mut::<ExtentTreeElement>() };
+        let entry_count = entries.len().min(MAX_EXTENT_ENTRIES_PER_BLOCK);
+        entries = &mut entries[..entry_count];
 
-        entries[0].header = ExtentHeader::from_parent(*self.header, entries.len() as u16);
+        entries[0].header = ExtentHeader::from_parent(*self.header, u16::try_from(entry_count).unwrap());
 
         self.append_extent_idx(ExtentIdx::new(logical_start, new_child_block_idx))
             .and(Ok(block_idx))
@@ -349,7 +371,7 @@ impl<'a> ExtentTreeLevel<'a> {
         if self.header.is_full() {
             bail!("Extent tree level full, cannot append new entry")
         } else {
-            let idx = self.header.valid_entry_count as usize;
+            let idx = usize::from(self.header.valid_entry_count);
             self.all_entries[idx] = entry;
             self.header.valid_entry_count += 1;
             Ok(())

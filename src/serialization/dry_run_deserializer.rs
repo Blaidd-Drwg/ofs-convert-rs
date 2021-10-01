@@ -18,7 +18,7 @@ pub type DryRunDeserializer<'a> = Deserializer<'a, DryRunDeserializerInternals<'
 /// - Insufficient free space in file system
 /// - Insufficient free inodes in the new ext4 file system
 impl<'a> DryRunDeserializer<'a> {
-    pub fn dry_run(reader: Reader<'a>, free_inodes: usize, free_blocks: usize, block_size: usize) -> Result<()> {
+    pub fn dry_run(reader: Reader<'a>, free_inodes: u32, free_blocks: usize, block_size: u32) -> Result<()> {
         let mut instance = Self {
             internals: DryRunDeserializerInternals::new(reader, free_inodes, free_blocks, block_size),
             _lifetime: PhantomData,
@@ -30,16 +30,16 @@ impl<'a> DryRunDeserializer<'a> {
 
 pub struct DryRunDeserializerInternals<'a> {
     reader: Reader<'a>,
-    free_inodes: usize,
+    free_inodes: u32,
     free_blocks: usize,
-    used_inodes: usize,
+    used_inodes: u32,
     used_blocks: usize,
-    block_size: usize,
+    block_size: u32,
 }
 
 impl<'a> DryRunDeserializerInternals<'a> {
     // TODO pass fs to constructor instead?
-    pub fn new(reader: Reader<'a>, free_inodes: usize, free_blocks: usize, block_size: usize) -> Self {
+    pub fn new(reader: Reader<'a>, free_inodes: u32, free_blocks: usize, block_size: u32) -> Self {
         Self {
             reader,
             free_inodes,
@@ -122,14 +122,14 @@ impl<'a> DryRunDeserializerInternals<'a> {
 pub struct DryRunDirectoryWriter {
     used_dentry_blocks: usize,
     used_extent_blocks: usize,
-    block_size: usize,
-    position_in_block: usize,
+    block_size: u32,
+    position_in_block: u32,
 }
 
 impl DirectoryWriter for DryRunDirectoryWriter {}
 
 impl DryRunDirectoryWriter {
-    fn new(block_size: usize) -> Self {
+    fn new(block_size: u32) -> Self {
         Self {
             used_dentry_blocks: 0,
             used_extent_blocks: 0,
@@ -140,12 +140,12 @@ impl DryRunDirectoryWriter {
 
     fn add_dentry(&mut self, dentry: &Ext4Dentry) -> usize {
         let old_used_blocks = self.used_blocks();
-        if dentry.dentry_len() as usize > self.remaining_space() {
+        if u32::from(dentry.dentry_len()) > self.remaining_space() {
             self.used_dentry_blocks += 1;
             self.position_in_block = 0;
             self.used_extent_blocks = ExtentTree::required_block_count(self.used_dentry_blocks, self.block_size);
         }
-        self.position_in_block += dentry.dentry_len() as usize;
+        self.position_in_block += u32::from(dentry.dentry_len());
 
         self.used_blocks() - old_used_blocks
     }
@@ -154,7 +154,7 @@ impl DryRunDirectoryWriter {
         self.used_dentry_blocks + self.used_extent_blocks
     }
 
-    fn remaining_space(&self) -> usize {
+    fn remaining_space(&self) -> u32 {
         self.block_size - self.position_in_block
     }
 }

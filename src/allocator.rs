@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::convert::TryFrom;
 use std::fmt::{Display, Formatter};
 use std::marker::PhantomData;
 use std::ops::Range;
@@ -9,6 +10,7 @@ use anyhow::{bail, Result};
 use crate::ext4::{BlockIdx, BlockIdx_from};
 use crate::fat::ClusterIdx;
 use crate::ranges::{NotCoveredRange, Ranges};
+use crate::util::usize_from;
 
 // TODO after/during serialization, mark directory dataclusters as free
 /// An `AllocatedClusterIdx` represents a cluster that was allocated by an `Allocator` and functions as a token to
@@ -49,7 +51,7 @@ impl From<AllocatedClusterIdx> for ClusterIdx {
 
 impl From<AllocatedClusterIdx> for usize {
     fn from(idx: AllocatedClusterIdx) -> Self {
-        idx.0 as Self
+        usize_from(idx.0)
     }
 }
 
@@ -65,7 +67,7 @@ pub struct AllocatedRange(Range<AllocatedClusterIdx>);
 
 impl AllocatedRange {
     pub fn len(&self) -> usize {
-        self.0.end.0 as usize - self.0.start.0 as usize
+        usize_from(self.0.end.0 - self.0.start.0)
     }
 
     pub fn iter_mut(&mut self) -> AllocatedIterMut {
@@ -157,7 +159,7 @@ impl<'a> Allocator<'a> {
     /// only read clusters that were allocated by `self`, the `Allocator` can only write and read
     /// clusters that could have been allocated by `self` but were not yet allocated.
     pub fn split_into_reader(self) -> (AllocatedReader<'a>, Self) {
-        let cursor_byte = self.cursor.get() as usize * self.cluster_size;
+        let cursor_byte = usize_from(self.cursor.get()) * self.cluster_size;
         let reader = AllocatedReader {
             fs_ptr: self.fs_ptr,
             fs_len: cursor_byte,
@@ -192,7 +194,8 @@ impl<'a> Allocator<'a> {
     /// Returns a cluster range that may be exclusively used by the caller with 1 <= `range.len()` <= `max_length`.
     pub fn allocate(&self, max_length: usize) -> Result<AllocatedRange> {
         let free_range = self.find_next_free_range(self.cursor.get())?;
-        let range_end = free_range.end.min(free_range.start + max_length as u32);
+        let range_len = u32::try_from(max_length.min(free_range.len())).expect("free_range.len() must fit into a u32");
+        let range_end = free_range.end.min(free_range.start + range_len);
         self.cursor.set(range_end);
         Ok(AllocatedRange(
             AllocatedClusterIdx(free_range.start)..AllocatedClusterIdx(range_end),
@@ -227,7 +230,7 @@ impl<'a> Allocator<'a> {
     fn cluster_start_byte(&self, idx: &AllocatedClusterIdx) -> Option<usize> {
         idx.0
             .checked_sub(self.first_valid_index)
-            .map(|relative_cluster_idx| self.cluster_size * relative_cluster_idx as usize)
+            .map(|relative_cluster_idx| self.cluster_size * usize_from(relative_cluster_idx))
             .filter(|start_byte| start_byte + self.cluster_size <= self.fs_len)
     }
 
@@ -246,7 +249,8 @@ impl<'a> Allocator<'a> {
     }
 
     fn max_cluster_idx(&self) -> ClusterIdx {
-        self.first_valid_index + (self.fs_len / self.cluster_size) as u32
+        self.first_valid_index
+            + u32::try_from(self.fs_len / self.cluster_size).expect("FAT32 cluster index must fit into a u32")
     }
 }
 
@@ -275,7 +279,7 @@ impl<'a> AllocatedReader<'a> {
     /// Returns the offset from `self.fs_ptr` at which the cluster `idx` starts or None if the cluster is not covered by
     /// `self`, i.e. if the offset is not in `0..=self.fs_len - self.cluster_size`.
     fn cluster_start_byte(&self, idx: &AllocatedClusterIdx) -> Option<usize> {
-        let start_byte = idx.0 as usize * self.cluster_size;
+        let start_byte = usize_from(idx.0) * self.cluster_size;
         if start_byte + self.cluster_size <= self.fs_len {
             Some(start_byte)
         } else {

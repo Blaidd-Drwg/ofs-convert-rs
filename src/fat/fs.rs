@@ -13,7 +13,7 @@ use crate::fat::{
     BootSector, Cluster, ClusterIdx, DataClusterIdx, FatFile, FatFileIter, FatIdxIter, FatTableIndex, ROOT_FAT_IDX,
 };
 use crate::ranges::Ranges;
-use crate::util::ExactAlign;
+use crate::util::{usize_from, ExactAlign};
 
 
 /// A FAT32 partition consists of 3 regions: the reserved sectors (which include the boot sector),
@@ -33,6 +33,7 @@ impl<'a> FatFs<'a> {
     /// - this memory represents a consistent FAT filesystem;
     /// - no pointer to one of the sections used by the FAT filesystem (i.e. the boot sector, the FAT table(s), and any
     ///   cluster that is not marked as free in the FAT table) will be dereferenced during the lifetime 'a.
+    /// PANICS: Panics if inconsistencies are detected in the filesystem
     pub unsafe fn new(partition_ptr: *mut u8, partition_len: usize, _lifetime: PhantomData<&'a ()>) -> Result<Self> {
         assert!(size_of::<BootSector>() <= partition_len);
         let boot_sector = (&*(partition_ptr as *const BootSector)).validate()?;
@@ -44,6 +45,7 @@ impl<'a> FatFs<'a> {
         let fat_table_bytes = slice::from_raw_parts(fat_table_ptr, fat_table_range.len());
         let fat_table = fat_table_bytes.exact_align_to::<FatTableIndex>();
 
+        // TODO more assertions: every data cluster has a FAT entry, max cluster idx fits into u32
         let data_range = boot_sector.get_data_range();
         assert!(data_range.start > fat_table_range.end);
         assert!(data_range.end <= partition_len);
@@ -75,8 +77,8 @@ impl<'a> FatFs<'a> {
         let instance = Self::new(partition_ptr, partition_len, lifetime)?;
         let allocator = Allocator::new(
             partition_ptr,
-            instance.boot_sector.fs_size() as usize,
-            instance.cluster_size(),
+            instance.boot_sector.fs_size(),
+            usize_from(instance.cluster_size()),
             instance.used_ranges(),
             lifetime,
         );
@@ -98,7 +100,7 @@ impl<'a> FatFs<'a> {
         self.fat_table
     }
 
-    pub fn cluster_size(&self) -> usize {
+    pub fn cluster_size(&self) -> u32 {
         self.boot_sector.cluster_size()
     }
 
@@ -121,7 +123,7 @@ impl<'a> FatFs<'a> {
     /// PANICS: Panics if `data_cluster_idx` is not a valid, in-use data cluster.
     pub fn data_cluster(&self, data_cluster_idx: DataClusterIdx) -> &Cluster {
         assert!(self.is_used(data_cluster_idx));
-        let cluster_size = self.cluster_size();
+        let cluster_size = usize_from(self.cluster_size());
         let start_byte = usize::from(data_cluster_idx) * cluster_size;
         assert!(start_byte + cluster_size <= self.data_len);
         // SAFETY: safe because the memory is valid and cannot be mutated without borrowing `self` as mut.
@@ -166,7 +168,7 @@ impl<'a> FatFs<'a> {
         ranges.insert(non_data_range);
 
         // could be optimized to build bigger ranges and call `ranges.insert` less often
-        for (fat_idx, &fat_cell) in self.fat_table().iter().enumerate().skip(u32::from(ROOT_FAT_IDX) as usize) {
+        for (fat_idx, &fat_cell) in self.fat_table().iter().enumerate().skip(usize::from(ROOT_FAT_IDX)) {
             if !fat_cell.is_free() {
                 let range_start = FatTableIndex::try_from(fat_idx).unwrap().to_cluster_idx(self.boot_sector());
                 ranges.insert(range_start..range_start + 1);

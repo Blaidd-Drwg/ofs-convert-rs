@@ -8,8 +8,9 @@ use crate::allocator::Allocator;
 use crate::ext4::{BlockIdx, Extent, ExtentHeader, ExtentTree, ExtentTreeElement, ExtentTreeLevel};
 use crate::fat::FatDentry;
 use crate::lohi::LoHiMut;
+use crate::util::u64_from;
 
-pub const EXTENT_ENTRIES_IN_INODE: usize = 5;
+pub const EXTENT_ENTRIES_IN_INODE: u16 = 5;
 pub const EXT2_LINK_MAX: u16 = 65_000;
 pub const NON_REPRESENTABLE_LINK_COUNT: u16 = 1;
 
@@ -48,7 +49,7 @@ pub struct InodeInner {
     pub i_blocks_lo: u32,
     pub i_flags: u32,
     pub l_i_version: u32,
-    pub extents: [ExtentTreeElement; EXTENT_ENTRIES_IN_INODE],
+    pub extents: [ExtentTreeElement; EXTENT_ENTRIES_IN_INODE as usize],
     pub i_generation: u32,
     pub i_file_acl_lo: u32,
     pub i_size_high: u32,
@@ -121,11 +122,11 @@ impl<'a> Inode<'a> {
         }
     }
 
-    pub fn increment_used_blocks(&mut self, block_count: usize, block_size: usize) {
+    pub fn increment_used_blocks(&mut self, block_count: usize, block_size: u32) {
         // number of 512-byte blocks allocated
-        let mini_block_count = block_count * block_size / 512;
+        let mini_block_count = u64_from(block_count) * (u64::from(block_size) / 512);
         let mut current_mini_block_count = LoHiMut::new(&mut self.inner.i_blocks_lo, &mut self.inner.l_i_blocks_high);
-        current_mini_block_count += mini_block_count as u64;
+        current_mini_block_count += mini_block_count;
     }
 }
 
@@ -150,7 +151,7 @@ impl InodeInner {
         const ROOT_USER_ID: u32 = 0;
         const ROOT_GROUP_ID: u32 = 0;
 
-        let now = Utc::now().timestamp() as u32;
+        let now = u32::try_from(Utc::now().timestamp()).unwrap();
         LoHiMut::new(&mut self.i_uid, &mut self.l_i_uid_high).set(ROOT_USER_ID);
         LoHiMut::new(&mut self.i_gid, &mut self.l_i_gid_high).set(ROOT_GROUP_ID);
         self.i_mode = DEFAULT_RWX | DIR_FLAG;
@@ -164,7 +165,7 @@ impl InodeInner {
     }
 
     fn init_root(&mut self) {
-        let now = Utc::now().timestamp() as u32;
+        let now = u32::try_from(Utc::now().timestamp()).unwrap();
         let user_id = u32::from(geteuid());
         let group_id = u32::from(getegid());
         LoHiMut::new(&mut self.i_uid, &mut self.l_i_uid_high).set(user_id);
@@ -180,7 +181,7 @@ impl InodeInner {
     }
 
     fn init_extent_header(&mut self) {
-        self.extents[0].header = ExtentHeader::new(EXTENT_ENTRIES_IN_INODE as u16);
+        self.extents[0].header = ExtentHeader::new(EXTENT_ENTRIES_IN_INODE);
     }
 
     fn is_dir(&self) -> bool {

@@ -1,5 +1,6 @@
 use crate::ext4::Ext4BlockGroupConstructionInfo;
 use crate::lohi::{LoHi, LoHiMut};
+use crate::util::u64_from;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Default)]
@@ -31,20 +32,20 @@ pub struct Ext4GroupDescriptor {
 
 impl Ext4GroupDescriptor {
     pub fn new(info: Ext4BlockGroupConstructionInfo) -> Self {
-        let block_bitmap_block = info.start_block + info.relative_block_bitmap_block;
-        let inode_bitmap_block = info.start_block + info.relative_inode_bitmap_block;
-        let inode_table_start_block = info.start_block + info.relative_inode_table_start_block;
+        let block_bitmap_block = u64_from(info.start_block + info.relative_block_bitmap_block);
+        let inode_bitmap_block = u64_from(info.start_block + info.relative_inode_bitmap_block);
+        let inode_table_start_block = u64_from(info.start_block + info.relative_inode_table_start_block);
         let free_inodes_count = info.inodes_count - info.reserved_inode_count;
-        let free_blocks_count = info.blocks_count as u64 - info.overhead;
+        let free_blocks_count = info.blocks_count - info.overhead;
 
         let mut instance = Self::default(); // zero every field
         LoHiMut::new(&mut instance.bg_block_bitmap_lo, &mut instance.bg_block_bitmap_hi).set(block_bitmap_block);
         LoHiMut::new(&mut instance.bg_inode_bitmap_lo, &mut instance.bg_inode_bitmap_hi).set(inode_bitmap_block);
         LoHiMut::new(&mut instance.bg_inode_table_lo, &mut instance.bg_inode_table_hi).set(inode_table_start_block);
         LoHiMut::new(&mut instance.bg_free_inodes_count_lo, &mut instance.bg_free_inodes_count_hi)
-            .set(free_inodes_count as u32);
+            .set(free_inodes_count);
         LoHiMut::new(&mut instance.bg_free_blocks_count_lo, &mut instance.bg_free_blocks_count_hi)
-            .set(free_blocks_count as u32);
+            .set(free_blocks_count);
         instance
     }
 

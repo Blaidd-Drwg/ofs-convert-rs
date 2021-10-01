@@ -29,8 +29,12 @@ use crate::ranges::Ranges;
 use crate::serialization::FatTreeSerializer;
 
 const_assert!(size_of::<usize>() >= size_of::<u32>());
+const_assert!(size_of::<usize>() <= size_of::<u64>());
 
 // TODO how does Ubuntu FAT driver handle timezones?
+// TODO what can overflow?
+// TODO convention: expect messages
+// TODO exhaustively enumerate failures during deserialization and make sure they are caught in the dry run
 // TODO allow manually increasing number of inodes
 // TODO sometimes using Result where Option would be more idiomatic
 // TODO add context to Errs
@@ -96,7 +100,9 @@ unsafe fn ofs_convert(partition_path: &str) -> Result<()> {
 
     let forbidden_ranges = superblock.block_group_overhead_ranges();
     let mut forbidden_ranges = into_cluster_idx_ranges(forbidden_ranges);
-    let overhanging_block_range = superblock.block_count_with_padding() as ClusterIdx..fat_fs.cluster_count();
+    let last_ext_cluster_idx = ClusterIdx::try_from(superblock.block_count_with_padding())
+        .expect("ext4 block count <= FAT32 cluster count, so the index fits into a ClusterIdx");
+    let overhanging_block_range = last_ext_cluster_idx..fat_fs.cluster_count();
     forbidden_ranges.insert(overhanging_block_range);
     for range in &forbidden_ranges {
         allocator.forbid(range.clone());
@@ -108,7 +114,7 @@ unsafe fn ofs_convert(partition_path: &str) -> Result<()> {
 
     let mut deserializer = serializer.into_deserializer().context("A dry run of the conversion failed")?;
 
-    // This step makes the FAT filesystem inconsistent
+    // If we fail before this step the FAT filesystem is still consistent
     deserializer.deserialize_directory_tree().context("Conversion failed")?;
 
     Ok(())
@@ -119,7 +125,7 @@ fn into_cluster_idx_ranges(ranges: Ranges<BlockIdx>) -> Ranges<ClusterIdx> {
         .into_iter()
         .map(|range| {
             ClusterIdx::try_from(range.start)
-                .expect("There are at most as many ext4 blocks as FAT32 clusters, so the indices fit into a u32")
+                .expect("ext4 blocks count <= FAT32 cluster count, so the indices fit into a ClusterIdx")
                 ..ClusterIdx::try_from(range.end).unwrap()
         })
         .collect()

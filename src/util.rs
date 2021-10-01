@@ -1,6 +1,8 @@
 use std::convert::TryFrom;
 
+use anyhow::{bail, Result};
 use num::CheckedAdd;
+
 
 /// Extension trait for a convenience method which transmutes a slice to a slice of another type
 /// while ensuring correct alignment and size.
@@ -25,7 +27,6 @@ where V: TryFrom<T> + TryFrom<U> + CheckedAdd {
     lhs.checked_add(&rhs)
 }
 
-// TODO fail compilation if usize > u64
 /// Converts a `usize` into a `u64`. Since `usize` is at most 64 bits wide, this conversion will never fail.
 pub fn u64_from(n: usize) -> u64 {
     debug_assert!(u64::try_from(n).is_ok());
@@ -36,4 +37,12 @@ pub fn u64_from(n: usize) -> u64 {
 pub fn usize_from(n: u32) -> usize {
     debug_assert!(usize::try_from(n).is_ok());
     n as usize
+}
+
+pub fn exact_log2(n: u32) -> Result<u8> {
+    let log = (f64::from(n)).log2().round() as u8;
+    if 2_u32.pow(u32::from(log)) != n {
+        bail!("n is not a power of 2");
+    }
+    Ok(log)
 }

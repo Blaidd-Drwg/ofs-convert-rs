@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::convert::TryFrom;
 use std::marker::PhantomData;
 use std::ops::Range;
 use std::rc::Rc;
@@ -9,6 +10,7 @@ use crate::allocator::{AllocatedClusterIdx, Allocator};
 use crate::ext4::{BlockIdx_from, Ext4Dentry, Ext4DentrySized, Ext4Fs, Extent, Inode, SuperBlock};
 use crate::fat::{ClusterIdx, FatDentry, FatFs};
 use crate::serialization::{Deserializer, DeserializerInternals, DirectoryWriter, DryRunDeserializer, Reader};
+use crate::util::u64_from;
 
 
 pub type Ext4TreeDeserializer<'a> = Deserializer<'a, Ext4TreeDeserializerInternals<'a>>;
@@ -70,7 +72,7 @@ impl<'a> DeserializerInternals<'a> for Ext4TreeDeserializerInternals<'a> {
             .into_iter()
             .map(|range| BlockIdx_from(range.start)..BlockIdx_from(range.end));
         self.ext_fs.set_extents(&mut inode, extent_iter, &self.allocator)?;
-        inode.set_size(dentry.file_size as u64);
+        inode.set_size(u64::from(dentry.file_size));
         Ok(())
     }
 
@@ -151,7 +153,7 @@ impl<'a> DentryWriter<'a> {
         let block = allocator.allocate_one()?;
         let extent = Extent::new(block.as_block_idx()..block.as_block_idx() + 1, 0);
         ext_fs.register_extent(&mut inode, extent, &allocator)?;
-        inode.increment_size(allocator.block_size() as u64);
+        inode.increment_size(u64_from(allocator.block_size()));
 
         Ok(Self {
             inode,
@@ -167,9 +169,10 @@ impl<'a> DentryWriter<'a> {
     }
 
     fn add_dentry(&mut self, dentry: Ext4Dentry, ext_fs: &mut Ext4Fs) -> Result<()> {
-        if dentry.dentry_len() as usize > self.remaining_space() {
+        if usize::from(dentry.dentry_len()) > self.remaining_space() {
             self.allocate_block(ext_fs)?;
         }
+        // TODO assert enough space?
 
         let name = dentry.serialize_name();
         let block = self.allocator.cluster_mut(&mut self.block);
@@ -183,7 +186,7 @@ impl<'a> DentryWriter<'a> {
             name_ptr.copy_from_nonoverlapping(name.as_ptr(), name.len());
         }
 
-        self.position_in_block += dentry.dentry_len() as usize;
+        self.position_in_block += usize::from(dentry.dentry_len());
         // SAFETY: It's the pointer we just wrote to, so it's valid, aligned and initialized.
         self.previous_dentry = unsafe { Some(&mut *dentry_ptr) };
         Ok(())
@@ -193,16 +196,14 @@ impl<'a> DentryWriter<'a> {
         self.link_count_from_subdirs += 1;
     }
 
+    /// Returns None if the result would overflow u16. That is only possible if `self.block_size == 2^16` and
+    /// `self.position_in_block == 0`.
     fn remaining_space(&self) -> usize {
         self.block_size - self.position_in_block
     }
 
     fn allocate_block(&mut self, ext_fs: &mut Ext4Fs) -> Result<()> {
-        let remaining_space = self.remaining_space();
-        if let Some(previous_dentry) = self.previous_dentry.as_mut() {
-            previous_dentry.increment_dentry_len(remaining_space as u16);
-        }
-
+        self.pad_previous_dentry();
         self.block = self.allocator.allocate_one()?;
 
         self.position_in_block = 0;
@@ -211,11 +212,21 @@ impl<'a> DentryWriter<'a> {
 
         let extent = Extent::new(
             self.block.as_block_idx()..self.block.as_block_idx() + 1,
-            self.block_count as u32 - 1,
+            u32::try_from(self.block_count - 1)?,
         );
         ext_fs.register_extent(&mut self.inode, extent, &self.allocator)?;
-        self.inode.increment_size(self.block_size as u64);
+        self.inode.increment_size(u64_from(self.block_size));
         Ok(())
+    }
+
+    fn pad_previous_dentry(&mut self) {
+        if self.previous_dentry.is_some() {
+            let remaining_space = u16::try_from(self.remaining_space()).expect(
+                "The only value that could overflow u16 is if `self.block_size == 2^16` and `self.position_in_block \
+                 == 0`. Since `self.previous_dentry` is Some, `self.position_in_block > 0`.",
+            );
+            self.previous_dentry.as_mut().unwrap().increment_dentry_len(remaining_space);
+        }
     }
 }
 
@@ -223,11 +234,7 @@ impl DirectoryWriter for DentryWriter<'_> {}
 
 impl Drop for DentryWriter<'_> {
     fn drop(&mut self) {
-        let remaining_space = self.remaining_space();
-        if let Some(previous_dentry) = self.previous_dentry.as_mut() {
-            previous_dentry.increment_dentry_len(remaining_space as u16);
-        }
-
+        self.pad_previous_dentry();
         self.inode.set_link_count_from_subdirs(self.link_count_from_subdirs);
     }
 }

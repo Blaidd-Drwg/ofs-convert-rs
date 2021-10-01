@@ -1,6 +1,7 @@
+use std::convert::TryFrom;
 use std::ops::Range;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use num::Integer;
 
 use crate::allocator::Allocator;
@@ -9,7 +10,7 @@ use crate::ext4::{
     SuperBlock, FIRST_EXISTING_INODE, FIRST_NON_RESERVED_INODE, LOST_FOUND_INODE_NO, ROOT_INODE_NO,
 };
 use crate::fat::BootSector;
-use crate::util::{checked_add, usize_from};
+use crate::util::usize_from;
 
 pub struct Ext4Fs<'a> {
     block_groups: Vec<BlockGroup<'a>>,
@@ -26,7 +27,7 @@ impl<'a> Ext4Fs<'a> {
         let mut block_groups = Vec::new();
         let mut block_group_descriptors = Vec::new();
 
-        for block_group_idx in 0..superblock.block_group_count() as usize {
+        for block_group_idx in 0..superblock.block_group_count() {
             let info = Ext4BlockGroupConstructionInfo::new(&superblock, block_group_idx);
             block_group_descriptors.push(Ext4GroupDescriptor::new(info));
             // SAFETY: TODO
@@ -72,28 +73,10 @@ impl<'a> Ext4Fs<'a> {
     /// Assumes that `inode` currently has no extents.
     pub fn set_extents<I>(&mut self, inode: &mut Inode, ranges: I, allocator: &Allocator<'_>) -> Result<()>
     where I: IntoIterator<Item = Range<BlockIdx>> {
-        for extent in Self::ranges_to_extents(ranges)? {
+        for extent in Extent::from_ranges(ranges)? {
             self.register_extent(inode, extent, allocator)?;
         }
         Ok(())
-    }
-
-    // TODO fail dry run when file has more than u32::max blocks
-    pub fn ranges_to_extents<I>(ranges: I) -> Result<Vec<Extent>>
-    where I: IntoIterator<Item = Range<BlockIdx>> {
-        let mut logical_start = 0u32;
-        let mut extents = Vec::new();
-        for mut range in ranges {
-            while !range.is_empty() {
-                let range_len = range.len().min(Extent::max_len());
-                let range_first_part = range.start..range.start + range_len;
-                extents.push(Extent::new(range_first_part, logical_start));
-                logical_start = checked_add(logical_start, range_len)
-                    .context("The size of a file's extents cannot sum up to more than 2^32 blocks")?;
-                range.start += range_len;
-            }
-        }
-        Ok(extents)
     }
 
     pub fn register_extent(&mut self, inode: &mut Inode, extent: Extent, allocator: &Allocator) -> Result<()> {
@@ -106,30 +89,34 @@ impl<'a> Ext4Fs<'a> {
         Ok(())
     }
 
-    pub fn block_group_idx_of_block(&self, block_idx: BlockIdx) -> usize {
+    pub fn block_group_idx_of_block(&self, block_idx: BlockIdx) -> u32 {
         // any block before `s_first_data_block` doesn't belong to any block group
         let data_block_idx = block_idx - BlockIdx_from(self.superblock().s_first_data_block);
-        data_block_idx / usize_from(self.superblock().s_blocks_per_group)
+        let bg_idx = data_block_idx / usize_from(self.superblock().s_blocks_per_group);
+        u32::try_from(bg_idx).expect("Attempted to compute a block group index that does not fit in a u32")
     }
 
+    /// PANICS: Panics if `range` contains blocks belonging to more than one block group
     pub fn mark_range_as_used(&mut self, inode: &mut Inode, range: Range<BlockIdx>) {
-        inode.increment_used_blocks(range.len(), self.superblock().block_size() as usize);
+        inode.increment_used_blocks(range.len(), self.superblock().block_size());
 
         let block_group_idx = self.block_group_idx_of_block(range.start);
         assert_eq!(block_group_idx, self.block_group_idx_of_block(range.end - 1));
 
-        self.group_descriptor_table_mut()[block_group_idx].decrement_free_blocks_count(range.len() as u32);
+        let range_len = u32::try_from(range.len())
+            .expect("All blocks belong to the same block group, so their count can't overflow u32");
+        self.group_descriptor_table_mut()[usize_from(block_group_idx)].decrement_free_blocks_count(range_len);
 
         let group_start_block = self.superblock_mut().block_group_start_block(block_group_idx);
         let relative_range = range.start - group_start_block..range.end - group_start_block;
-        self.block_groups[block_group_idx].mark_relative_range_as_used(relative_range);
+        self.block_groups[usize_from(block_group_idx)].mark_relative_range_as_used(relative_range);
     }
 
     pub unsafe fn build_root_inode(&mut self) -> Inode<'a> {
         let inode_no = ROOT_INODE_NO;
         let existing_inode_no = inode_no - FIRST_EXISTING_INODE;
-        let inode_size = self.superblock().s_inode_size as usize;
-        let inner = self.block_groups[0].get_relative_inode(existing_inode_no as usize, inode_size);
+        let inode_size = self.superblock().s_inode_size;
+        let inner = self.block_groups[0].get_relative_inode(existing_inode_no, inode_size);
         let mut inode = Inode { inode_no, inner };
         inode.init_root();
 
@@ -150,15 +137,15 @@ impl<'a> Ext4Fs<'a> {
     /// Therefore, the inode returned by the first call to `allocate_inode` should be used for lost+found.
     pub fn allocate_inode(&mut self, is_dir: bool) -> Inode<'a> {
         let inode_no = self.next_free_inode_no;
-        let inode_size = self.superblock().s_inode_size as usize;
+        let inode_size = self.superblock().s_inode_size;
         self.next_free_inode_no += 1;
 
         let existing_inode_no = inode_no - FIRST_EXISTING_INODE;
         let (block_group_idx, relative_inode_no) = existing_inode_no.div_rem(&self.superblock().s_inodes_per_group);
-        let block_group = &mut self.block_groups[block_group_idx as usize];
-        let inner = block_group.allocate_relative_inode(relative_inode_no as usize, inode_size);
+        let block_group = &mut self.block_groups[usize_from(block_group_idx)];
+        let inner = block_group.allocate_relative_inode(relative_inode_no, inode_size);
 
-        let descriptor = &mut self.group_descriptor_table_mut()[block_group_idx as usize];
+        let descriptor = &mut self.group_descriptor_table_mut()[usize_from(block_group_idx)];
         descriptor.decrement_free_inode_count();
         if is_dir {
             descriptor.increment_used_directory_count();
@@ -179,7 +166,7 @@ impl Drop for Ext4Fs<'_> {
         let free_blocks_count = self
             .group_descriptor_table_mut()
             .iter_mut()
-            .map(|block_group| block_group.free_blocks_count() as u64)
+            .map(|block_group| u64::from(block_group.free_blocks_count()))
             .sum();
         self.superblock_mut().set_free_blocks_count(free_blocks_count);
 
@@ -187,7 +174,7 @@ impl Drop for Ext4Fs<'_> {
         let superblock = *self.superblock_mut();
         let gdt = self.group_descriptor_table_mut().to_vec();
         for backup_group_idx in superblock.s_backup_bgs {
-            let block_group = &mut self.block_groups[backup_group_idx as usize];
+            let block_group = &mut self.block_groups[usize_from(backup_group_idx)];
             (*block_group
                 .superblock
                 .as_deref_mut()

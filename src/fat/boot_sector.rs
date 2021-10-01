@@ -4,6 +4,7 @@ use std::ops::Range;
 use anyhow::{bail, Result};
 
 use crate::fat::{ClusterIdx, FatDentry};
+use crate::util::usize_from;
 
 const FS_TYPE_FAT32: [u8; 8] = *b"FAT32   ";
 const EXT_BOOT_SIGNATURE_FAT32: u8 = 0x29;
@@ -71,8 +72,8 @@ impl BootSector {
 
     /// Returns the range in bytes of the data region, relative to the filesystem start
     pub fn get_data_range(&self) -> Range<usize> {
-        let first_data_byte = self.first_data_sector() as usize * usize::from(self.bytes_per_sector);
-        first_data_byte..self.fs_size() as usize
+        let first_data_byte = usize_from(self.first_data_sector()) * usize::from(self.bytes_per_sector);
+        first_data_byte..self.fs_size()
     }
 
     fn first_data_sector(&self) -> u32 {
@@ -96,17 +97,18 @@ impl BootSector {
     }
 
     /// in bytes
-    pub fn fs_size(&self) -> u64 {
-        u64::from(self.bytes_per_sector) * u64::from(self.sector_count())
+    // TODO result?
+    pub fn fs_size(&self) -> usize {
+        usize::from(self.bytes_per_sector) * usize_from(self.sector_count())
     }
 
     /// in bytes
-    pub fn cluster_size(&self) -> usize {
-        usize::from(self.sectors_per_cluster) * usize::from(self.bytes_per_sector)
+    pub fn cluster_size(&self) -> u32 {
+        u32::from(self.sectors_per_cluster) * u32::from(self.bytes_per_sector)
     }
 
     pub fn dentries_per_cluster(&self) -> usize {
-        self.cluster_size() / std::mem::size_of::<FatDentry>()
+        usize_from(self.cluster_size()) / std::mem::size_of::<FatDentry>()
     }
 
     pub fn volume_label(&self) -> &[u8] {

@@ -1,3 +1,6 @@
+use std::convert::TryFrom;
+use std::mem::size_of;
+
 use anyhow::{bail, Result};
 
 const EXT4_NAME_MAX_LEN: usize = 255;
@@ -23,8 +26,12 @@ impl Ext4Dentry {
         if name.len() > EXT4_NAME_MAX_LEN {
             bail!("Length of file name '{}' exceeds 255 bytes", name);
         }
-        let dentry_len = aligned_length(name.len() + 8, ALIGNMENT) as u16;
-        let inner = Ext4DentrySized { inode_no, dentry_len, name_len: name.len() as u16 };
+        let dentry_len = u16::try_from(aligned_length(name.len() + size_of::<Ext4DentrySized>(), ALIGNMENT)).unwrap();
+        let inner = Ext4DentrySized {
+            inode_no,
+            dentry_len,
+            name_len: u16::try_from(name.len()).unwrap(),
+        };
         Ok(Self { inner, name })
     }
 
@@ -41,9 +48,10 @@ impl Ext4Dentry {
 }
 
 impl Ext4DentrySized {
-    pub fn increment_dentry_len(&mut self, dentry_len: u16) {
-        assert!(dentry_len % 4 == 0);
-        self.dentry_len += dentry_len;
+    /// PANICS: Panics if `dentry
+    pub fn increment_dentry_len(&mut self, num: u16) {
+        assert!(usize::from(num) % ALIGNMENT == 0);
+        self.dentry_len += num;
     }
 }
 
