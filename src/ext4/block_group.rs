@@ -3,8 +3,8 @@ use std::slice;
 
 use crate::bitmap::Bitmap;
 use crate::ext4::{
-    BlockIdx, Ext4GroupDescriptor, HasSuperBlock, InodeInner, SuperBlock, FIRST_BLOCK_PADDING, FIRST_EXISTING_INODE,
-    FIRST_NON_RESERVED_INODE,
+    BlockCount, BlockCount_from, BlockGroupIdx, BlockIdx, BlockSize, Ext4GroupDescriptor, HasSuperBlock, InodeCount,
+    InodeInner, SuperBlock, FIRST_BLOCK_PADDING, FIRST_EXISTING_INODE, FIRST_NON_RESERVED_INODE,
 };
 use crate::util::usize_from;
 
@@ -119,8 +119,8 @@ impl<'a> BlockGroup<'a> {
     unsafe fn blocks_slice<'b>(
         block_group_ptr: *mut u8,
         relative_block_idx: usize,
-        block_size: u32,
-        block_count: usize,
+        block_size: BlockSize,
+        block_count: BlockCount,
     ) -> &'b mut [u8] {
         let start_byte = relative_block_idx * usize_from(block_size);
         let ptr = block_group_ptr.add(start_byte);
@@ -135,7 +135,7 @@ impl<'a> BlockGroup<'a> {
         }
     }
 
-    pub fn allocate_relative_inode(&mut self, relative_inode_no: u32, inode_size: u16) -> &'a mut InodeInner {
+    pub fn allocate_relative_inode(&mut self, relative_inode_no: InodeCount, inode_size: u16) -> &'a mut InodeInner {
         let mut bitmap = Bitmap { data: self.inode_bitmap };
         assert!(
             !bitmap.get(usize_from(relative_inode_no)),
@@ -148,7 +148,7 @@ impl<'a> BlockGroup<'a> {
     }
 
     /// SAFETY: Undefined behavior if the function is called twice with the same `relative_inode_no`.
-    pub unsafe fn get_relative_inode(&mut self, relative_inode_no: u32, inode_size: u16) -> &'a mut InodeInner {
+    pub unsafe fn get_relative_inode(&mut self, relative_inode_no: InodeCount, inode_size: u16) -> &'a mut InodeInner {
         let offset = usize_from(relative_inode_no) * usize::from(inode_size);
         assert!(offset + usize::from(inode_size) <= self.inode_table_len);
         let ptr = self.inode_table_ptr.add(offset) as *mut InodeInner;
@@ -172,20 +172,20 @@ pub enum SuperBlockConstructionInfo {
 #[derive(Clone, Copy, Debug)]
 pub struct Ext4BlockGroupConstructionInfo {
     pub start_block: BlockIdx,
-    pub relative_block_bitmap_block: usize,
-    pub relative_inode_bitmap_block: usize,
-    pub relative_inode_table_start_block: usize,
-    pub blocks_count: usize,
-    pub inodes_count: u32,
-    pub inode_table_block_count: usize,
+    pub relative_block_bitmap_block: BlockCount,
+    pub relative_inode_bitmap_block: BlockCount,
+    pub relative_inode_table_start_block: BlockCount,
+    pub blocks_count: BlockCount,
+    pub inodes_count: InodeCount,
+    pub inode_table_block_count: BlockCount,
     pub superblock_construction_info: SuperBlockConstructionInfo,
-    pub block_size: u32,
-    pub reserved_inode_count: u32,
-    pub overhead: usize,
+    pub block_size: BlockSize,
+    pub reserved_inode_count: InodeCount,
+    pub overhead: BlockCount,
 }
 
 impl Ext4BlockGroupConstructionInfo {
-    pub fn new(superblock: &SuperBlock, block_group_idx: u32) -> Self {
+    pub fn new(superblock: &SuperBlock, block_group_idx: BlockGroupIdx) -> Self {
         let has_superblock = superblock.block_group_has_superblock(block_group_idx);
 
         let relative_block_bitmap_block = superblock.superblock_copy_overhead(has_superblock);
@@ -194,17 +194,17 @@ impl Ext4BlockGroupConstructionInfo {
 
         let max_block_count = superblock.block_count_without_padding()
             - usize_from(block_group_idx) * usize_from(superblock.s_blocks_per_group);
-        let blocks_count = max_block_count.min(usize_from(superblock.s_blocks_per_group));
+        let blocks_count = max_block_count.min(BlockCount_from(superblock.s_blocks_per_group));
 
         let superblock_construction_info = match has_superblock {
             HasSuperBlock::No => SuperBlockConstructionInfo::No,
             HasSuperBlock::YesOriginal => SuperBlockConstructionInfo::YesOriginal {
                 relative_group_descriptor_start_block: 1,
-                group_descriptor_len: usize_from(superblock.block_group_count()),
+                group_descriptor_len: BlockCount_from(superblock.block_group_count()),
             },
             HasSuperBlock::YesBackup => SuperBlockConstructionInfo::YesBackup {
                 relative_group_descriptor_start_block: 1,
-                group_descriptor_len: usize_from(superblock.block_group_count()),
+                group_descriptor_len: BlockCount_from(superblock.block_group_count()),
             },
         };
 

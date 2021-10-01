@@ -1,4 +1,4 @@
-use crate::ext4::Ext4BlockGroupConstructionInfo;
+use crate::ext4::{Ext4BlockGroupConstructionInfo, InodeCount};
 use crate::lohi::{LoHi, LoHiMut};
 use crate::util::u64_from;
 
@@ -49,7 +49,7 @@ impl Ext4GroupDescriptor {
         instance
     }
 
-    pub fn free_inodes_count(&self) -> u32 {
+    pub fn free_inodes_count(&self) -> InodeCount {
         LoHi::new(&self.bg_free_inodes_count_lo, &self.bg_free_inodes_count_hi).get()
     }
 

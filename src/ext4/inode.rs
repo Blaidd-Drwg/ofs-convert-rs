@@ -5,7 +5,9 @@ use chrono::prelude::*;
 use nix::unistd::{getegid, geteuid};
 
 use crate::allocator::Allocator;
-use crate::ext4::{BlockIdx, Extent, ExtentHeader, ExtentTree, ExtentTreeElement, ExtentTreeLevel};
+use crate::ext4::{
+    BlockCount, BlockIdx, BlockSize, Extent, ExtentHeader, ExtentTree, ExtentTreeElement, ExtentTreeLevel, InodeNo,
+};
 use crate::fat::FatDentry;
 use crate::lohi::LoHiMut;
 use crate::util::u64_from;
@@ -30,7 +32,7 @@ const EXECUTE_GROUP: u16 = 0o000_004;
 const DEFAULT_RWX: u16 = READ_USER | READ_GROUP | READ_OTHERS | WRITE_USER | WRITE_GROUP | EXECUTE_USER | EXECUTE_GROUP;
 
 pub struct Inode<'a> {
-    pub inode_no: u32,
+    pub inode_no: InodeNo,
     pub inner: &'a mut InodeInner,
 }
 
@@ -122,7 +124,7 @@ impl<'a> Inode<'a> {
         }
     }
 
-    pub fn increment_used_blocks(&mut self, block_count: usize, block_size: u32) {
+    pub fn increment_used_blocks(&mut self, block_count: BlockCount, block_size: BlockSize) {
         // number of 512-byte blocks allocated
         let mini_block_count = u64_from(block_count) * (u64::from(block_size) / 512);
         let mut current_mini_block_count = LoHiMut::new(&mut self.inner.i_blocks_lo, &mut self.inner.l_i_blocks_high);

@@ -6,8 +6,8 @@ use num::Integer;
 
 use crate::allocator::Allocator;
 use crate::ext4::{
-    BlockGroup, BlockIdx, BlockIdx_from, Ext4BlockGroupConstructionInfo, Ext4GroupDescriptor, Extent, Inode,
-    SuperBlock, FIRST_EXISTING_INODE, FIRST_NON_RESERVED_INODE, LOST_FOUND_INODE_NO, ROOT_INODE_NO,
+    BlockGroup, BlockGroupIdx, BlockIdx, BlockIdx_from, Ext4BlockGroupConstructionInfo, Ext4GroupDescriptor, Extent,
+    Inode, InodeNo, SuperBlock, FIRST_EXISTING_INODE, FIRST_NON_RESERVED_INODE, LOST_FOUND_INODE_NO, ROOT_INODE_NO,
 };
 use crate::fat::BootSector;
 use crate::util::usize_from;
@@ -15,7 +15,7 @@ use crate::util::usize_from;
 pub struct Ext4Fs<'a> {
     block_groups: Vec<BlockGroup<'a>>,
     /// Used for allocating inodes
-    next_free_inode_no: u32,
+    next_free_inode_no: InodeNo,
 }
 
 impl<'a> Ext4Fs<'a> {
@@ -89,11 +89,11 @@ impl<'a> Ext4Fs<'a> {
         Ok(())
     }
 
-    pub fn block_group_idx_of_block(&self, block_idx: BlockIdx) -> u32 {
+    pub fn block_group_idx_of_block(&self, block_idx: BlockIdx) -> BlockGroupIdx {
         // any block before `s_first_data_block` doesn't belong to any block group
         let data_block_idx = block_idx - BlockIdx_from(self.superblock().s_first_data_block);
         let bg_idx = data_block_idx / usize_from(self.superblock().s_blocks_per_group);
-        u32::try_from(bg_idx).expect("Attempted to compute a block group index that does not fit in a u32")
+        BlockGroupIdx::try_from(bg_idx).expect("Attempted to compute a block group index that does not fit in a u32")
     }
 
     /// PANICS: Panics if `range` contains blocks belonging to more than one block group

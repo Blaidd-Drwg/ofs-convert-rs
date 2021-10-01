@@ -3,6 +3,8 @@ use std::mem::size_of;
 
 use anyhow::{bail, Result};
 
+use crate::ext4::InodeNo;
+
 const EXT4_NAME_MAX_LEN: usize = 255;
 const ALIGNMENT: usize = 4;
 
@@ -14,14 +16,14 @@ pub struct Ext4Dentry {
 #[derive(Clone, Copy)]
 #[repr(C, packed)]
 pub struct Ext4DentrySized {
-    inode_no: u32,
+    inode_no: InodeNo,
     /// Always a multiple of 4 to ensure alignment
     dentry_len: u16,
     name_len: u16,
 }
 
 impl Ext4Dentry {
-    pub fn new(inode_no: u32, name: String) -> Result<Self> {
+    pub fn new(inode_no: InodeNo, name: String) -> Result<Self> {
         // FAT32 allows names up to 255 UCS-2 characters, which may be longer than 255 bytes
         if name.len() > EXT4_NAME_MAX_LEN {
             bail!("Length of file name '{}' exceeds 255 bytes", name);

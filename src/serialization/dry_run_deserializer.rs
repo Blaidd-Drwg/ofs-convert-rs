@@ -4,7 +4,7 @@ use std::ops::Range;
 
 use anyhow::{bail, Result};
 
-use crate::ext4::{Ext4Dentry, ExtentTree};
+use crate::ext4::{BlockCount, BlockSize, Ext4Dentry, ExtentTree, InodeCount};
 use crate::fat::{ClusterIdx, FatDentry};
 use crate::serialization::{Deserializer, DeserializerInternals, DirectoryWriter, Reader};
 
@@ -18,7 +18,12 @@ pub type DryRunDeserializer<'a> = Deserializer<'a, DryRunDeserializerInternals<'
 /// - Insufficient free space in file system
 /// - Insufficient free inodes in the new ext4 file system
 impl<'a> DryRunDeserializer<'a> {
-    pub fn dry_run(reader: Reader<'a>, free_inodes: u32, free_blocks: usize, block_size: u32) -> Result<()> {
+    pub fn dry_run(
+        reader: Reader<'a>,
+        free_inodes: InodeCount,
+        free_blocks: BlockCount,
+        block_size: BlockSize,
+    ) -> Result<()> {
         let mut instance = Self {
             internals: DryRunDeserializerInternals::new(reader, free_inodes, free_blocks, block_size),
             _lifetime: PhantomData,
@@ -30,16 +35,16 @@ impl<'a> DryRunDeserializer<'a> {
 
 pub struct DryRunDeserializerInternals<'a> {
     reader: Reader<'a>,
-    free_inodes: u32,
-    free_blocks: usize,
-    used_inodes: u32,
-    used_blocks: usize,
-    block_size: u32,
+    free_inodes: InodeCount,
+    free_blocks: BlockCount,
+    used_inodes: InodeCount,
+    used_blocks: BlockCount,
+    block_size: BlockSize,
 }
 
 impl<'a> DryRunDeserializerInternals<'a> {
     // TODO pass fs to constructor instead?
-    pub fn new(reader: Reader<'a>, free_inodes: u32, free_blocks: usize, block_size: u32) -> Self {
+    pub fn new(reader: Reader<'a>, free_inodes: InodeCount, free_blocks: BlockCount, block_size: BlockSize) -> Self {
         Self {
             reader,
             free_inodes,
@@ -120,16 +125,16 @@ impl<'a> DryRunDeserializerInternals<'a> {
 }
 
 pub struct DryRunDirectoryWriter {
-    used_dentry_blocks: usize,
-    used_extent_blocks: usize,
-    block_size: u32,
+    used_dentry_blocks: BlockCount,
+    used_extent_blocks: BlockCount,
+    block_size: BlockSize,
     position_in_block: u32,
 }
 
 impl DirectoryWriter for DryRunDirectoryWriter {}
 
 impl DryRunDirectoryWriter {
-    fn new(block_size: u32) -> Self {
+    fn new(block_size: BlockSize) -> Self {
         Self {
             used_dentry_blocks: 0,
             used_extent_blocks: 0,

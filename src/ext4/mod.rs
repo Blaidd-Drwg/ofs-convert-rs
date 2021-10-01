@@ -20,11 +20,20 @@ use crate::util::usize_from;
 pub const FIRST_BLOCK_PADDING: usize = 1024;
 
 /// There is no inode with inode_no 0.
-pub const FIRST_EXISTING_INODE: u32 = 1;
-pub const FIRST_NON_RESERVED_INODE: u32 = 11;
+pub const FIRST_EXISTING_INODE: InodeNo = 1;
+pub const FIRST_NON_RESERVED_INODE: InodeNo = 11;
 
-// TODO blockidx newtype?
-pub type BlockIdx = usize;
+pub type BlockSize = u32;
+pub type BlockGroupCount = u32;
+pub type BlockGroupIdx = BlockGroupCount;
+pub type InodeCount = u32;
+pub type InodeNo = InodeCount;
+pub type BlockCount = usize;
+pub type BlockIdx = BlockCount;
+#[allow(non_snake_case)]
+pub fn BlockCount_from(n: u32) -> BlockCount {
+    usize_from(n)
+}
 #[allow(non_snake_case)]
 pub fn BlockIdx_from(n: u32) -> BlockIdx {
     usize_from(n)

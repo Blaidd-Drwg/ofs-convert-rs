@@ -6,9 +6,8 @@ use std::slice;
 use anyhow::{bail, Context, Result};
 use static_assertions::const_assert_eq;
 
-use super::BlockIdx;
 use crate::allocator::{AllocatedClusterIdx, Allocator};
-use crate::ext4::EXTENT_ENTRIES_IN_INODE;
+use crate::ext4::{BlockCount, BlockIdx, BlockSize, EXTENT_ENTRIES_IN_INODE};
 use crate::lohi::{LoHi, LoHiMut};
 use crate::util::{checked_add, u64_from, usize_from};
 
@@ -187,7 +186,7 @@ impl<'a> ExtentTree<'a> {
         Self { root: root_level, allocator }
     }
 
-    pub fn required_block_count(extent_count: usize, block_size: u32) -> usize {
+    pub fn required_block_count(extent_count: usize, block_size: BlockSize) -> BlockCount {
         if extent_count == 0 {
             return 0;
         }
