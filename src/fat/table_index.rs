@@ -3,7 +3,7 @@ use std::iter::Step;
 use std::ops::{Add, AddAssign, Index};
 
 use crate::fat::{BootSector, ClusterIdx};
-use crate::util::usize_from;
+use crate::util::FromU32;
 
 /// The first FAT index belonging to the root directory. This corresponds to the first data cluster, i.e. the n-th FAT
 /// entry corresponds to the (n-2)-th data cluster.
@@ -85,7 +85,7 @@ impl From<FatTableIndex> for u32 {
 
 impl From<FatTableIndex> for usize {
     fn from(idx: FatTableIndex) -> Self {
-        usize_from(idx.0)
+        usize::fromx(idx.0)
     }
 }
 

@@ -28,15 +28,25 @@ where V: TryFrom<T> + TryFrom<U> + CheckedAdd {
 }
 
 /// Converts a `usize` into a `u64`. Since `usize` is at most 64 bits wide, this conversion will never fail.
-pub fn u64_from(n: usize) -> u64 {
-    debug_assert!(u64::try_from(n).is_ok());
-    n as u64
+pub trait FromUsize {
+    fn fromx(n: usize) -> Self;
+}
+impl FromUsize for u64 {
+    fn fromx(n: usize) -> Self {
+        debug_assert!(Self::try_from(n).is_ok());
+        n as Self
+    }
 }
 
 /// Converts a `u32` into a `usize`. Since `usize` is at least 32 bits wide, this conversion will never fail.
-pub fn usize_from(n: u32) -> usize {
-    debug_assert!(usize::try_from(n).is_ok());
-    n as usize
+pub trait FromU32 {
+    fn fromx(n: u32) -> Self;
+}
+impl FromU32 for usize {
+    fn fromx(n: u32) -> Self {
+        debug_assert!(Self::try_from(n).is_ok());
+        n as Self
+    }
 }
 
 pub fn exact_log2(n: u32) -> Result<u8> {

@@ -6,11 +6,11 @@ use num::Integer;
 
 use crate::allocator::Allocator;
 use crate::ext4::{
-    BlockGroup, BlockGroupIdx, BlockIdx, BlockIdx_from, Ext4BlockGroupConstructionInfo, Ext4GroupDescriptor, Extent,
-    Inode, InodeNo, SuperBlock, FIRST_EXISTING_INODE, FIRST_NON_RESERVED_INODE, LOST_FOUND_INODE_NO, ROOT_INODE_NO,
+    BlockGroup, BlockGroupIdx, BlockIdx, Ext4BlockGroupConstructionInfo, Ext4GroupDescriptor, Extent, Inode, InodeNo,
+    SuperBlock, FIRST_EXISTING_INODE, FIRST_NON_RESERVED_INODE, LOST_FOUND_INODE_NO, ROOT_INODE_NO,
 };
 use crate::fat::BootSector;
-use crate::util::usize_from;
+use crate::util::FromU32;
 
 pub struct Ext4Fs<'a> {
     block_groups: Vec<BlockGroup<'a>>,
@@ -91,8 +91,8 @@ impl<'a> Ext4Fs<'a> {
 
     pub fn block_group_idx_of_block(&self, block_idx: BlockIdx) -> BlockGroupIdx {
         // any block before `s_first_data_block` doesn't belong to any block group
-        let data_block_idx = block_idx - BlockIdx_from(self.superblock().s_first_data_block);
-        let bg_idx = data_block_idx / usize_from(self.superblock().s_blocks_per_group);
+        let data_block_idx = block_idx - BlockIdx::fromx(self.superblock().s_first_data_block);
+        let bg_idx = data_block_idx / usize::fromx(self.superblock().s_blocks_per_group);
         BlockGroupIdx::try_from(bg_idx).expect("Attempted to compute a block group index that does not fit in a u32")
     }
 
@@ -105,11 +105,11 @@ impl<'a> Ext4Fs<'a> {
 
         let range_len = u32::try_from(range.len())
             .expect("All blocks belong to the same block group, so their count can't overflow u32");
-        self.group_descriptor_table_mut()[usize_from(block_group_idx)].decrement_free_blocks_count(range_len);
+        self.group_descriptor_table_mut()[usize::fromx(block_group_idx)].decrement_free_blocks_count(range_len);
 
         let group_start_block = self.superblock_mut().block_group_start_block(block_group_idx);
         let relative_range = range.start - group_start_block..range.end - group_start_block;
-        self.block_groups[usize_from(block_group_idx)].mark_relative_range_as_used(relative_range);
+        self.block_groups[usize::fromx(block_group_idx)].mark_relative_range_as_used(relative_range);
     }
 
     pub unsafe fn build_root_inode(&mut self) -> Inode<'a> {
@@ -142,10 +142,10 @@ impl<'a> Ext4Fs<'a> {
 
         let existing_inode_no = inode_no - FIRST_EXISTING_INODE;
         let (block_group_idx, relative_inode_no) = existing_inode_no.div_rem(&self.superblock().s_inodes_per_group);
-        let block_group = &mut self.block_groups[usize_from(block_group_idx)];
+        let block_group = &mut self.block_groups[usize::fromx(block_group_idx)];
         let inner = block_group.allocate_relative_inode(relative_inode_no, inode_size);
 
-        let descriptor = &mut self.group_descriptor_table_mut()[usize_from(block_group_idx)];
+        let descriptor = &mut self.group_descriptor_table_mut()[usize::fromx(block_group_idx)];
         descriptor.decrement_free_inode_count();
         if is_dir {
             descriptor.increment_used_directory_count();
@@ -174,7 +174,7 @@ impl Drop for Ext4Fs<'_> {
         let superblock = *self.superblock_mut();
         let gdt = self.group_descriptor_table_mut().to_vec();
         for backup_group_idx in superblock.s_backup_bgs {
-            let block_group = &mut self.block_groups[usize_from(backup_group_idx)];
+            let block_group = &mut self.block_groups[usize::fromx(backup_group_idx)];
             (*block_group
                 .superblock
                 .as_deref_mut()

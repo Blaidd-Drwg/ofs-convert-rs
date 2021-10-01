@@ -13,7 +13,7 @@ use crate::fat::{
     BootSector, Cluster, ClusterIdx, DataClusterIdx, FatFile, FatFileIter, FatIdxIter, FatTableIndex, ROOT_FAT_IDX,
 };
 use crate::ranges::Ranges;
-use crate::util::{usize_from, ExactAlign};
+use crate::util::{ExactAlign, FromU32};
 
 
 /// A FAT32 partition consists of 3 regions: the reserved sectors (which include the boot sector),
@@ -78,7 +78,7 @@ impl<'a> FatFs<'a> {
         let allocator = Allocator::new(
             partition_ptr,
             instance.boot_sector.fs_size(),
-            usize_from(instance.cluster_size()),
+            usize::fromx(instance.cluster_size()),
             instance.used_ranges(),
             lifetime,
         );
@@ -93,8 +93,6 @@ impl<'a> FatFs<'a> {
     pub fn boot_sector(&self) -> &BootSector {
         self.boot_sector
     }
-
-    // TODO all the int type conversions (from, try_from)
 
     pub fn fat_table(&self) -> &'a [FatTableIndex] {
         self.fat_table
@@ -123,7 +121,7 @@ impl<'a> FatFs<'a> {
     /// PANICS: Panics if `data_cluster_idx` is not a valid, in-use data cluster.
     pub fn data_cluster(&self, data_cluster_idx: DataClusterIdx) -> &Cluster {
         assert!(self.is_used(data_cluster_idx));
-        let cluster_size = usize_from(self.cluster_size());
+        let cluster_size = usize::fromx(self.cluster_size());
         let start_byte = usize::from(data_cluster_idx) * cluster_size;
         assert!(start_byte + cluster_size <= self.data_len);
         // SAFETY: safe because the memory is valid and cannot be mutated without borrowing `self` as mut.

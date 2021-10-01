@@ -10,7 +10,7 @@ use crate::ext4::{
 };
 use crate::fat::FatDentry;
 use crate::lohi::LoHiMut;
-use crate::util::u64_from;
+use crate::util::FromUsize;
 
 pub const EXTENT_ENTRIES_IN_INODE: u16 = 5;
 pub const EXT2_LINK_MAX: u16 = 65_000;
@@ -126,7 +126,7 @@ impl<'a> Inode<'a> {
 
     pub fn increment_used_blocks(&mut self, block_count: BlockCount, block_size: BlockSize) {
         // number of 512-byte blocks allocated
-        let mini_block_count = u64_from(block_count) * (u64::from(block_size) / 512);
+        let mini_block_count = u64::fromx(block_count) * (u64::from(block_size) / 512);
         let mut current_mini_block_count = LoHiMut::new(&mut self.inner.i_blocks_lo, &mut self.inner.l_i_blocks_high);
         current_mini_block_count += mini_block_count;
     }

@@ -1,6 +1,6 @@
 use crate::ext4::{Ext4BlockGroupConstructionInfo, InodeCount};
 use crate::lohi::{LoHi, LoHiMut};
-use crate::util::u64_from;
+use crate::util::FromUsize;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Default)]
@@ -32,9 +32,9 @@ pub struct Ext4GroupDescriptor {
 
 impl Ext4GroupDescriptor {
     pub fn new(info: Ext4BlockGroupConstructionInfo) -> Self {
-        let block_bitmap_block = u64_from(info.start_block + info.relative_block_bitmap_block);
-        let inode_bitmap_block = u64_from(info.start_block + info.relative_inode_bitmap_block);
-        let inode_table_start_block = u64_from(info.start_block + info.relative_inode_table_start_block);
+        let block_bitmap_block = u64::fromx(info.start_block + info.relative_block_bitmap_block);
+        let inode_bitmap_block = u64::fromx(info.start_block + info.relative_inode_bitmap_block);
+        let inode_table_start_block = u64::fromx(info.start_block + info.relative_inode_table_start_block);
         let free_inodes_count = info.inodes_count - info.reserved_inode_count;
         let free_blocks_count = info.blocks_count - info.overhead;
 

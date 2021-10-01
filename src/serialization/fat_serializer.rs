@@ -10,7 +10,7 @@ use crate::allocator::Allocator;
 use crate::fat::{ClusterIdx, DataClusterIdx, FatDentry, FatFile, FatFs, FatTableIndex, ROOT_FAT_IDX};
 use crate::ranges::Ranges;
 use crate::serialization::{Ext4TreeDeserializer, FileType, StreamArchiver};
-use crate::util::usize_from;
+use crate::util::FromU32;
 
 
 type Timestamp = u32;
@@ -67,7 +67,7 @@ pub fn fat_time_to_unix_time(date: u16, time: Option<u16>) -> Result<u32> {
 impl<'a> FatTreeSerializer<'a> {
     pub fn new(allocator: Allocator<'a>, fat_fs: FatFs<'a>, forbidden_ranges: Ranges<ClusterIdx>) -> Self {
         let allocator = Rc::new(allocator);
-        let stream_archiver = StreamArchiver::new(allocator.clone(), usize_from(fat_fs.cluster_size()));
+        let stream_archiver = StreamArchiver::new(allocator.clone(), usize::fromx(fat_fs.cluster_size()));
         Self {
             allocator,
             fat_fs,

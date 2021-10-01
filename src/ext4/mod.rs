@@ -13,7 +13,6 @@ pub use self::fs::*;
 pub use self::group_descriptor::*;
 pub use self::inode::*;
 pub use self::superblock::*;
-use crate::util::usize_from;
 
 /// The first block in the partition is padded with 1024 bytes. If the block size is also 1024 bytes, the entire first
 /// block is padding, and the first block group starts with the second block.
@@ -30,11 +29,3 @@ pub type InodeCount = u32;
 pub type InodeNo = InodeCount;
 pub type BlockCount = usize;
 pub type BlockIdx = BlockCount;
-#[allow(non_snake_case)]
-pub fn BlockCount_from(n: u32) -> BlockCount {
-    usize_from(n)
-}
-#[allow(non_snake_case)]
-pub fn BlockIdx_from(n: u32) -> BlockIdx {
-    usize_from(n)
-}

@@ -7,10 +7,10 @@ use std::slice;
 
 use anyhow::{bail, Result};
 
-use crate::ext4::{BlockIdx, BlockIdx_from};
+use crate::ext4::BlockIdx;
 use crate::fat::ClusterIdx;
 use crate::ranges::{NotCoveredRange, Ranges};
-use crate::util::usize_from;
+use crate::util::FromU32;
 
 // TODO after/during serialization, mark directory dataclusters as free
 /// An `AllocatedClusterIdx` represents a cluster that was allocated by an `Allocator` and functions as a token to
@@ -39,7 +39,7 @@ impl AllocatedClusterIdx {
 
     /// SAFETY: This is safe since it cannot be converted back to an `AllocatedClusterIdx` or to a `DataClusterIdx`.
     pub fn as_block_idx(&self) -> BlockIdx {
-        BlockIdx_from(self.0)
+        BlockIdx::fromx(self.0)
     }
 }
 
@@ -51,7 +51,7 @@ impl From<AllocatedClusterIdx> for ClusterIdx {
 
 impl From<AllocatedClusterIdx> for usize {
     fn from(idx: AllocatedClusterIdx) -> Self {
-        usize_from(idx.0)
+        usize::fromx(idx.0)
     }
 }
 
@@ -67,7 +67,7 @@ pub struct AllocatedRange(Range<AllocatedClusterIdx>);
 
 impl AllocatedRange {
     pub fn len(&self) -> usize {
-        usize_from(self.0.end.0 - self.0.start.0)
+        usize::fromx(self.0.end.0 - self.0.start.0)
     }
 
     pub fn iter_mut(&mut self) -> AllocatedIterMut {
@@ -159,7 +159,7 @@ impl<'a> Allocator<'a> {
     /// only read clusters that were allocated by `self`, the `Allocator` can only write and read
     /// clusters that could have been allocated by `self` but were not yet allocated.
     pub fn split_into_reader(self) -> (AllocatedReader<'a>, Self) {
-        let cursor_byte = usize_from(self.cursor.get()) * self.cluster_size;
+        let cursor_byte = usize::fromx(self.cursor.get()) * self.cluster_size;
         let reader = AllocatedReader {
             fs_ptr: self.fs_ptr,
             fs_len: cursor_byte,
@@ -230,7 +230,7 @@ impl<'a> Allocator<'a> {
     fn cluster_start_byte(&self, idx: &AllocatedClusterIdx) -> Option<usize> {
         idx.0
             .checked_sub(self.first_valid_index)
-            .map(|relative_cluster_idx| self.cluster_size * usize_from(relative_cluster_idx))
+            .map(|relative_cluster_idx| self.cluster_size * usize::fromx(relative_cluster_idx))
             .filter(|start_byte| start_byte + self.cluster_size <= self.fs_len)
     }
 
@@ -279,7 +279,7 @@ impl<'a> AllocatedReader<'a> {
     /// Returns the offset from `self.fs_ptr` at which the cluster `idx` starts or None if the cluster is not covered by
     /// `self`, i.e. if the offset is not in `0..=self.fs_len - self.cluster_size`.
     fn cluster_start_byte(&self, idx: &AllocatedClusterIdx) -> Option<usize> {
-        let start_byte = usize_from(idx.0) * self.cluster_size;
+        let start_byte = usize::fromx(idx.0) * self.cluster_size;
         if start_byte + self.cluster_size <= self.fs_len {
             Some(start_byte)
         } else {

@@ -4,12 +4,12 @@ use anyhow::{bail, Context, Result};
 use uuid::Uuid;
 
 use crate::ext4::{
-    BlockCount, BlockCount_from, BlockGroupCount, BlockGroupIdx, BlockIdx, BlockIdx_from, BlockSize, InodeCount,
-    InodeNo, FIRST_BLOCK_PADDING, FIRST_EXISTING_INODE, FIRST_NON_RESERVED_INODE,
+    BlockCount, BlockGroupCount, BlockGroupIdx, BlockIdx, BlockSize, InodeCount, InodeNo, FIRST_BLOCK_PADDING,
+    FIRST_EXISTING_INODE, FIRST_NON_RESERVED_INODE,
 };
 use crate::fat::BootSector;
 use crate::lohi::{LoHi, LoHiMut};
-use crate::util::{exact_log2, u64_from, usize_from};
+use crate::util::{exact_log2, FromU32, FromUsize};
 use crate::Ranges;
 
 pub const ROOT_INODE_NO: InodeNo = 2;
@@ -147,7 +147,7 @@ pub struct SuperBlock {
 
 impl SuperBlock {
     pub fn from(boot_sector: &BootSector) -> Result<Self> {
-        if boot_sector.get_data_range().start % usize_from(boot_sector.cluster_size()) != 0 {
+        if boot_sector.get_data_range().start % usize::fromx(boot_sector.cluster_size()) != 0 {
             // We want to treat FAT clusters as ext4 blocks, but we can't if they're not aligned
             bail!(
                 "The FAT filesystem's data section must be aligned to its cluster size (for more info, see the -a \
@@ -210,18 +210,18 @@ impl SuperBlock {
         // For some reason in tests we found that mkfs.ext4 didn't follow this logic and instead set sb.blocks_per_group
         // to a value lower than `block_size` * 8, but this is easier to implement.
         // We use the sparse_super2 logic from mke2fs, meaning that the last block group always has a super block copy.
-        let mut block_count = fs_len / BlockCount_from(block_size);
-        let mut data_block_count = block_count - BlockCount_from(sb.s_first_data_block);
+        let mut block_count = fs_len / BlockCount::fromx(block_size);
+        let mut data_block_count = block_count - BlockCount::fromx(sb.s_first_data_block);
         // set the intermediate value in `sb` because it is needed by the call to `sb.block_group_overhead`.
-        LoHiMut::new(&mut sb.s_blocks_count_lo, &mut sb.s_blocks_count_hi).set(u64_from(block_count));
-        let last_group_block_count = data_block_count % BlockCount_from(sb.s_blocks_per_group);
+        LoHiMut::new(&mut sb.s_blocks_count_lo, &mut sb.s_blocks_count_hi).set(u64::fromx(block_count));
+        let last_group_block_count = data_block_count % BlockCount::fromx(sb.s_blocks_per_group);
 
         // `s_reserved_gdt_blocks`, `s_log_block_size`, `s_desc_size`, `s_inodes_per_group`, `s_inode_size`,
         // `s_blocks_per_group`, `s_blocks_count_hi` and `s_blocks_count_lo` must have a value before this call
         if last_group_block_count < sb.block_group_overhead(HasSuperBlock::YesBackup) + MIN_USABLE_BLOCKS_PER_GROUP {
             block_count -= last_group_block_count;
             data_block_count -= last_group_block_count;
-            LoHiMut::new(&mut sb.s_blocks_count_lo, &mut sb.s_blocks_count_hi).set(u64_from(block_count));
+            LoHiMut::new(&mut sb.s_blocks_count_lo, &mut sb.s_blocks_count_hi).set(u64::fromx(block_count));
         }
 
         if data_block_count == 0 {
@@ -232,7 +232,7 @@ impl SuperBlock {
         }
 
         // Same logic as in mke2fs
-        let block_group_count = data_block_count.div_ceil(BlockCount_from(sb.s_blocks_per_group));
+        let block_group_count = data_block_count.div_ceil(BlockCount::fromx(sb.s_blocks_per_group));
         let block_group_count = BlockGroupCount::try_from(block_group_count)
             // This can only happen with absurdly large filesystems in the petabye range
             .context("Filesystem too large, it would have more than 2^32 block groups.")?;
@@ -273,12 +273,12 @@ impl SuperBlock {
 
     fn gdt_block_count(&self) -> BlockCount {
         let descriptors_per_gdt_block = self.block_size() / BlockSize::from(self.s_desc_size);
-        BlockCount_from(self.block_group_count().div_ceil(descriptors_per_gdt_block))
+        BlockCount::fromx(self.block_group_count().div_ceil(descriptors_per_gdt_block))
     }
 
     pub fn inode_table_block_count(&self) -> BlockCount {
-        let inode_table_size = usize_from(self.s_inodes_per_group) * usize::from(self.s_inode_size);
-        inode_table_size.div_ceil(usize_from(self.block_size()))
+        let inode_table_size = usize::fromx(self.s_inodes_per_group) * usize::from(self.s_inode_size);
+        inode_table_size.div_ceil(usize::fromx(self.block_size()))
     }
 
     pub fn block_size(&self) -> BlockSize {
@@ -292,13 +292,13 @@ impl SuperBlock {
     }
 
     pub fn block_count_without_padding(&self) -> BlockCount {
-        self.block_count_with_padding() - BlockCount_from(self.s_first_data_block)
+        self.block_count_with_padding() - BlockCount::fromx(self.s_first_data_block)
     }
 
     pub fn block_group_count(&self) -> BlockGroupCount {
         let count = self
             .block_count_without_padding()
-            .div_ceil(BlockCount_from(self.s_blocks_per_group));
+            .div_ceil(BlockCount::fromx(self.s_blocks_per_group));
         BlockGroupCount::try_from(count)
             .expect("We made sure in `Self::new` that the block group count fits into a u32.")
     }
@@ -314,12 +314,12 @@ impl SuperBlock {
     }
 
     pub fn first_data_block(&self) -> BlockIdx {
-        BlockIdx_from(self.s_first_data_block)
+        BlockIdx::fromx(self.s_first_data_block)
     }
 
     // if the block size is FIRST_BLOCK_PADDING, every block group begins one block later than normal
     pub fn block_group_start_block(&self, block_group_idx: BlockGroupIdx) -> BlockIdx {
-        usize_from(self.s_blocks_per_group) * usize_from(block_group_idx) + self.first_data_block()
+        usize::fromx(self.s_blocks_per_group) * usize::fromx(block_group_idx) + self.first_data_block()
     }
 
     /// Returns the block ranges that contain filesystem metadata, i.e. the ones occupied by the fields of `BlockGroup`.
@@ -341,7 +341,7 @@ impl SuperBlock {
     }
 
     pub fn first_block_is_padding(&self) -> bool {
-        usize_from(self.block_size()) <= FIRST_BLOCK_PADDING
+        usize::fromx(self.block_size()) <= FIRST_BLOCK_PADDING
     }
 
     pub fn set_free_blocks_count(&mut self, count: u64) {

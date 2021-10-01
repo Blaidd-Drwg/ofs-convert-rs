@@ -9,7 +9,7 @@ use static_assertions::const_assert_eq;
 use crate::allocator::{AllocatedClusterIdx, Allocator};
 use crate::ext4::{BlockCount, BlockIdx, BlockSize, EXTENT_ENTRIES_IN_INODE};
 use crate::lohi::{LoHi, LoHiMut};
-use crate::util::{checked_add, u64_from, usize_from};
+use crate::util::{checked_add, FromU32, FromUsize};
 
 const_assert_eq!(size_of::<Extent>(), size_of::<ExtentTreeElement>());
 const_assert_eq!(size_of::<ExtentHeader>(), size_of::<ExtentTreeElement>());
@@ -67,7 +67,7 @@ impl Extent {
             physical_start_hi: 0,
             physical_start_lo: 0,
         };
-        LoHiMut::new(&mut instance.physical_start_lo, &mut instance.physical_start_hi).set(u64_from(range.start));
+        LoHiMut::new(&mut instance.physical_start_lo, &mut instance.physical_start_hi).set(u64::fromx(range.start));
         instance
     }
 
@@ -191,7 +191,7 @@ impl<'a> ExtentTree<'a> {
             return 0;
         }
 
-        let extents_per_block = usize_from(block_size) / size_of::<ExtentTreeElement>();
+        let extents_per_block = usize::fromx(block_size) / size_of::<ExtentTreeElement>();
         let level_count = 1
             + (extent_count as f64 / (EXTENT_ENTRIES_IN_INODE - 1) as f64)
                 .log(extents_per_block as f64)
