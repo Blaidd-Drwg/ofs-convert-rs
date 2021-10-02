@@ -117,11 +117,10 @@ impl<'a> Inode<'a> {
     }
 
     fn extent_tree<'b>(&'b mut self, allocator: &'b Allocator<'b>) -> ExtentTree<'b> {
-        // SAFETY: TODO
-        unsafe {
-            let root_level = ExtentTreeLevel::new(&mut self.inner.extents);
-            ExtentTree::new(root_level, allocator)
-        }
+        // SAFETY: Safe because the extent tree in is consistent when `self.inner` is initialized, and is kept
+        // consistent when adding extents via `ExtentTree::add_extent`.
+        let root_level = unsafe { ExtentTreeLevel::new(&mut self.inner.extents) };
+        ExtentTree::new(root_level, allocator)
     }
 
     pub fn increment_used_blocks(&mut self, block_count: BlockCount, block_size: BlockSize) {

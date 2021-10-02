@@ -45,7 +45,6 @@ impl<'a> FatFs<'a> {
         let fat_table_bytes = slice::from_raw_parts(fat_table_ptr, fat_table_range.len());
         let fat_table = fat_table_bytes.exact_align_to::<FatTableIndex>();
 
-        // TODO more assertions: every data cluster has a FAT entry, max cluster idx fits into u32
         let data_range = boot_sector.get_data_range();
         assert!(data_range.start > fat_table_range.end);
         assert!(data_range.end <= partition_len);

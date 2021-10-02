@@ -23,6 +23,8 @@ pub struct Ext4DentrySized {
 }
 
 impl Ext4Dentry {
+    pub const MAX_LEN: usize = aligned_length(EXT4_NAME_MAX_LEN + size_of::<Ext4DentrySized>(), ALIGNMENT);
+
     pub fn new(inode_no: InodeNo, name: String) -> Result<Self> {
         // FAT32 allows names up to 255 UCS-2 characters, which may be longer than 255 bytes
         if name.len() > EXT4_NAME_MAX_LEN {
@@ -57,6 +59,6 @@ impl Ext4DentrySized {
     }
 }
 
-fn aligned_length(n: usize, alignment: usize) -> usize {
+const fn aligned_length(n: usize, alignment: usize) -> usize {
     n.next_multiple_of(alignment)
 }

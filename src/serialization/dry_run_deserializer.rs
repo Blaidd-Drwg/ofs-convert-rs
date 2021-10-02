@@ -43,7 +43,6 @@ pub struct DryRunDeserializerInternals<'a> {
 }
 
 impl<'a> DryRunDeserializerInternals<'a> {
-    // TODO pass fs to constructor instead?
     pub fn new(reader: Reader<'a>, free_inodes: InodeCount, free_blocks: BlockCount, block_size: BlockSize) -> Self {
         Self {
             reader,
@@ -55,6 +54,8 @@ impl<'a> DryRunDeserializerInternals<'a> {
         }
     }
 
+    // We perform the entire dry run and return a Result only afterward instead of bailing as soon a we know it will
+    // fail. This is better because it lets the user know how many more inodes/blocks they would need.
     fn result(&self) -> Result<()> {
         let enough_inodes = self.used_inodes <= self.free_inodes;
         let enough_blocks = self.used_blocks <= self.free_blocks;

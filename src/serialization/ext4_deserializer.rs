@@ -152,6 +152,8 @@ pub struct DentryWriter<'a> {
 
 impl<'a> DentryWriter<'a> {
     pub fn new(mut inode: Inode<'a>, allocator: Rc<Allocator<'a>>, ext_fs: &mut Ext4Fs) -> Result<Self> {
+        assert!(allocator.block_size() >= Ext4Dentry::MAX_LEN);
+
         let block = allocator.allocate_one()?;
         let extent = Extent::new(block.as_block_idx()..block.as_block_idx() + 1, 0);
         ext_fs.register_extent(&mut inode, extent, &allocator)?;
@@ -174,7 +176,7 @@ impl<'a> DentryWriter<'a> {
         if usize::from(dentry.dentry_len()) > self.remaining_space() {
             self.allocate_block(ext_fs)?;
         }
-        // TODO assert enough space?
+        debug_assert!(self.remaining_space() >= usize::from(dentry.dentry_len()));
 
         let name = dentry.serialize_name();
         let block = self.allocator.cluster_mut(&mut self.block);

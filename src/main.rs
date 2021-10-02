@@ -92,7 +92,7 @@ fn is_yes(s: &str) -> bool {
 /// SAFETY: `partition_path` must point to a partition containing a consistent FAT32 filesystem.
 unsafe fn ofs_convert(partition_path: &str) -> Result<()> {
     let mut partition = Partition::open(partition_path)?;
-    // SAFETY: TODO
+    // SAFETY: Safe because `partition`'s memory is valid and contains a FAT32 filesystem.
     let (fat_fs, mut allocator) =
         FatFs::new_with_allocator(partition.as_mut_ptr(), partition.len(), partition.lifetime)?;
     let boot_sector = fat_fs.boot_sector();
