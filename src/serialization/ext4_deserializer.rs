@@ -8,8 +8,10 @@ use anyhow::Result;
 
 use crate::allocator::{AllocatedClusterIdx, Allocator};
 use crate::ext4::{BlockIdx, Ext4Dentry, Ext4DentrySized, Ext4Fs, Extent, Inode, SuperBlock};
-use crate::fat::{ClusterIdx, FatDentry, FatFs};
-use crate::serialization::{Deserializer, DeserializerInternals, DirectoryWriter, DryRunDeserializer, Reader};
+use crate::fat::{ClusterIdx, FatFs};
+use crate::serialization::{
+    DentryRepresentation, Deserializer, DeserializerInternals, DirectoryWriter, DryRunDeserializer, Reader,
+};
 use crate::util::{FromU32, FromUsize};
 
 
@@ -50,7 +52,7 @@ impl<'a> DeserializerInternals<'a> for Ext4TreeDeserializerInternals<'a> {
 
     fn deserialize_directory(
         &mut self,
-        dentry: FatDentry,
+        dentry: DentryRepresentation,
         name: String,
         parent_dentry_writer: &mut DentryWriter<'a>,
     ) -> Result<DentryWriter<'a>> {
@@ -62,7 +64,7 @@ impl<'a> DeserializerInternals<'a> for Ext4TreeDeserializerInternals<'a> {
 
     fn deserialize_regular_file(
         &mut self,
-        dentry: FatDentry,
+        dentry: DentryRepresentation,
         name: String,
         extents: Vec<Range<ClusterIdx>>,
         parent_directory_writer: &mut DentryWriter,
@@ -88,11 +90,11 @@ impl<'a> Ext4TreeDeserializerInternals<'a> {
 
     fn build_file(
         &mut self,
-        dentry: FatDentry,
+        dentry: DentryRepresentation,
         name: String,
         parent_dentry_writer: &mut DentryWriter,
     ) -> Result<Inode<'a>> {
-        let mut inode = self.ext_fs.allocate_inode(dentry.is_dir());
+        let mut inode = self.ext_fs.allocate_inode(dentry.is_dir);
         inode.init_from_dentry(dentry)?;
         parent_dentry_writer.add_dentry(Ext4Dentry::new(inode.inode_no, name)?, &mut self.ext_fs)?;
         Ok(inode)

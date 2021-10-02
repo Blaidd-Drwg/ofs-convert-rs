@@ -1,19 +1,16 @@
 use std::cell::RefCell;
-use std::convert::{TryFrom, TryInto};
+use std::convert::TryInto;
 use std::ops::Range;
 use std::rc::Rc;
 
-use anyhow::{Context, Result};
-use chrono::prelude::*;
+use anyhow::Result;
 
 use crate::allocator::Allocator;
 use crate::fat::{ClusterIdx, DataClusterIdx, FatDentry, FatFile, FatFs, FatTableIndex, ROOT_FAT_IDX};
 use crate::ranges::Ranges;
-use crate::serialization::{Ext4TreeDeserializer, FileType, StreamArchiver};
+use crate::serialization::{DentryRepresentation, Ext4TreeDeserializer, FileType, StreamArchiver};
 use crate::util::FromU32;
 
-
-type Timestamp = u32;
 
 pub struct FatTreeSerializer<'a> {
     fat_fs: FatFs<'a>,
@@ -24,44 +21,6 @@ pub struct FatTreeSerializer<'a> {
                                                    * `self.stream_archiver`, so we wrap it in a RefCell. */
     forbidden_ranges: Ranges<ClusterIdx>, /* ranges that cannot contain any data as they will be overwritten with
                                            * ext4 metadata */
-}
-
-/// A slimmed down representation of the relevant components of a FAT dentry for serialization
-/// This excludes the file name and the file's data ranges: since they have variable length,
-/// they are treated separately.
-struct DentryRepresentation {
-    access_time: Timestamp,
-    create_time: Timestamp,
-    mod_time: Timestamp,
-}
-
-impl DentryRepresentation {
-    pub fn from(dentry: &FatDentry) -> Result<Self> {
-        Ok(Self {
-            access_time: fat_time_to_unix_time(dentry.access_date, None)?,
-            create_time: fat_time_to_unix_time(dentry.create_date, Some(dentry.create_time))?,
-            mod_time: fat_time_to_unix_time(dentry.mod_date, Some(dentry.mod_time))?,
-        })
-    }
-}
-
-pub fn fat_time_to_unix_time(date: u16, time: Option<u16>) -> Result<u32> {
-    let year = ((date & 0xFE00) >> 9) + 1980;
-    let month = (date & 0x1E0) >> 5;
-    let day = date & 0x1F;
-    let date = Utc.ymd(i32::from(year), u32::from(month), u32::from(day));
-
-    let mut hour = 0;
-    let mut minute = 0;
-    let mut second = 0;
-    if let Some(time) = time {
-        hour = (time & 0xF800) >> 11;
-        minute = (time & 0x7E0) >> 5;
-        second = (time & 0x1F) * 2;
-    }
-
-    let datetime = date.and_hms(u32::from(hour), u32::from(minute), u32::from(second));
-    u32::try_from(datetime.timestamp()).context("Timestamp after year 2038 does not fit into 32 bits")
 }
 
 impl<'a> FatTreeSerializer<'a> {
@@ -120,7 +79,7 @@ impl<'a> FatTreeSerializer<'a> {
     fn archive_regular_file(&self, file: NonOverlappingFatFile) -> Result<()> {
         let mut archiver = self.stream_archiver.borrow_mut();
         archiver.archive(vec![FileType::RegularFile])?;
-        archiver.archive(vec![file.dentry])?;
+        archiver.archive(vec![DentryRepresentation::from(file.dentry)?])?;
         archiver.archive(file.name.into_bytes())?;
         archiver.archive(file.data_ranges)?;
         Ok(())
@@ -129,7 +88,7 @@ impl<'a> FatTreeSerializer<'a> {
     fn archive_directory(&self, file: FatFile, child_count: u32) -> Result<()> {
         let mut archiver = self.stream_archiver.borrow_mut();
         archiver.archive(vec![FileType::Directory(child_count)])?;
-        archiver.archive(vec![file.dentry])?;
+        archiver.archive(vec![DentryRepresentation::from(file.dentry)?])?;
         archiver.archive(file.name.into_bytes())?;
         Ok(())
     }

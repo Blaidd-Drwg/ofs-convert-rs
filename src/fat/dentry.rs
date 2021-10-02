@@ -1,8 +1,10 @@
-use anyhow::Result;
+use std::convert::TryFrom;
+
+use anyhow::{Context, Result};
+use chrono::prelude::*;
 
 use crate::fat::FatTableIndex;
 use crate::lohi::LoHi;
-use crate::serialization::fat_time_to_unix_time;
 
 #[repr(C)]
 pub union FatPseudoDentry {
@@ -122,17 +124,16 @@ impl FatDentry {
         name_string
     }
 
-    // TODO either rework archiving or move `fat_time_to_unix_time` to this module
     pub fn access_time_as_unix(&self) -> Result<u32> {
-        fat_time_to_unix_time(self.access_date, None)
+        fat_time_to_unix(self.access_date, None)
     }
 
     pub fn create_time_as_unix(&self) -> Result<u32> {
-        fat_time_to_unix_time(self.create_date, Some(self.create_time))
+        fat_time_to_unix(self.create_date, Some(self.create_time))
     }
 
     pub fn modify_time_as_unix(&self) -> Result<u32> {
-        fat_time_to_unix_time(self.mod_date, Some(self.mod_time))
+        fat_time_to_unix(self.mod_date, Some(self.mod_time))
     }
 }
 
@@ -176,4 +177,23 @@ impl LongFileName {
 
         ucs_string.into_iter().take_while(|&character| character != 0x0000).collect()
     }
+}
+
+fn fat_time_to_unix(date: u16, time: Option<u16>) -> Result<u32> {
+    let year = ((date & 0xFE00) >> 9) + 1980;
+    let month = (date & 0x1E0) >> 5;
+    let day = date & 0x1F;
+    let date = Utc.ymd(i32::from(year), u32::from(month), u32::from(day));
+
+    let mut hour = 0;
+    let mut minute = 0;
+    let mut second = 0;
+    if let Some(time) = time {
+        hour = (time & 0xF800) >> 11;
+        minute = (time & 0x7E0) >> 5;
+        second = (time & 0x1F) * 2;
+    }
+
+    let datetime = date.and_hms(u32::from(hour), u32::from(minute), u32::from(second));
+    u32::try_from(datetime.timestamp()).context("Timestamp after year 2038 does not fit into 32 bits")
 }

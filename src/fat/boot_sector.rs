@@ -97,7 +97,6 @@ impl BootSector {
     }
 
     /// in bytes
-    // TODO result?
     pub fn fs_size(&self) -> usize {
         usize::from(self.bytes_per_sector) * usize::fromx(self.sector_count())
     }

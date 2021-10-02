@@ -8,8 +8,8 @@ use crate::allocator::Allocator;
 use crate::ext4::{
     BlockCount, BlockIdx, BlockSize, Extent, ExtentHeader, ExtentTree, ExtentTreeElement, ExtentTreeLevel, InodeNo,
 };
-use crate::fat::FatDentry;
 use crate::lohi::LoHiMut;
+use crate::serialization::DentryRepresentation;
 use crate::util::FromUsize;
 
 pub const EXTENT_ENTRIES_IN_INODE: u16 = 5;
@@ -74,7 +74,7 @@ pub struct InodeInner {
 }
 
 impl<'a> Inode<'a> {
-    pub fn init_from_dentry(&mut self, dentry: FatDentry) -> Result<()> {
+    pub fn init_from_dentry(&mut self, dentry: DentryRepresentation) -> Result<()> {
         self.inner.init_from_dentry(dentry)
     }
 
@@ -133,15 +133,15 @@ impl<'a> Inode<'a> {
 }
 
 impl InodeInner {
-    fn init_from_dentry(&mut self, dentry: FatDentry) -> Result<()> {
+    fn init_from_dentry(&mut self, dentry: DentryRepresentation) -> Result<()> {
         let user_id = u32::from(geteuid());
         let group_id = u32::from(getegid());
         LoHiMut::new(&mut self.i_uid, &mut self.l_i_uid_high).set(user_id);
         LoHiMut::new(&mut self.i_gid, &mut self.l_i_gid_high).set(group_id);
-        self.i_mode = DEFAULT_RWX | if dentry.is_dir() { DIR_FLAG } else { REG_FLAG };
-        self.i_crtime = dentry.create_time_as_unix()?;
-        self.i_atime = dentry.access_time_as_unix()?;
-        self.i_mtime = dentry.modify_time_as_unix()?;
+        self.i_mode = DEFAULT_RWX | if dentry.is_dir { DIR_FLAG } else { REG_FLAG };
+        self.i_crtime = dentry.create_time;
+        self.i_atime = dentry.access_time;
+        self.i_mtime = dentry.mod_time;
         self.i_ctime = self.i_mtime + 1; // mimic behavior of the Linux FAT driver
         self.i_links_count = 1;
         self.i_flags = INODE_USES_EXTENTS;

@@ -4,8 +4,8 @@ use std::ops::Range;
 
 use anyhow::Result;
 
-use crate::fat::{ClusterIdx, FatDentry};
-use crate::serialization::FileType;
+use crate::fat::ClusterIdx;
+use crate::serialization::{DentryRepresentation, FileType};
 
 
 pub trait DirectoryWriter {}
@@ -34,14 +34,14 @@ pub trait DeserializerInternals<'a> {
 
     fn deserialize_directory(
         &mut self,
-        dentry: FatDentry,
+        dentry: DentryRepresentation,
         name: String,
         parent_directory_writer: &mut Self::D,
     ) -> Result<Self::D>;
 
     fn deserialize_regular_file(
         &mut self,
-        dentry: FatDentry,
+        dentry: DentryRepresentation,
         name: String,
         extents: Vec<Range<ClusterIdx>>,
         parent_directory_writer: &mut Self::D,
@@ -52,7 +52,7 @@ pub trait DeserializerInternals<'a> {
 
     fn deserialize_file(&mut self, parent_directory_writer: &mut Self::D) -> Result<()> {
         let file_type = self.read_next::<FileType>()[0];
-        let dentry = self.read_next::<FatDentry>()[0];
+        let dentry = self.read_next::<DentryRepresentation>()[0];
         let name = String::from_utf8(self.read_next::<u8>())
             .expect("File name is no longer a valid String after deserialization");
 

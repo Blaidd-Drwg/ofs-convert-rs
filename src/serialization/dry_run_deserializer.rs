@@ -5,8 +5,8 @@ use std::ops::Range;
 use anyhow::{bail, Result};
 
 use crate::ext4::{BlockCount, BlockSize, Ext4Dentry, ExtentTree, InodeCount};
-use crate::fat::{ClusterIdx, FatDentry};
-use crate::serialization::{Deserializer, DeserializerInternals, DirectoryWriter, Reader};
+use crate::fat::ClusterIdx;
+use crate::serialization::{DentryRepresentation, Deserializer, DeserializerInternals, DirectoryWriter, Reader};
 
 
 pub type DryRunDeserializer<'a> = Deserializer<'a, DryRunDeserializerInternals<'a>>;
@@ -94,7 +94,7 @@ impl<'a> DeserializerInternals<'a> for DryRunDeserializerInternals<'a> {
 
     fn deserialize_directory(
         &mut self,
-        _dentry: FatDentry,
+        _dentry: DentryRepresentation,
         name: String,
         parent_directory_writer: &mut DryRunDirectoryWriter,
     ) -> Result<DryRunDirectoryWriter> {
@@ -104,7 +104,7 @@ impl<'a> DeserializerInternals<'a> for DryRunDeserializerInternals<'a> {
 
     fn deserialize_regular_file(
         &mut self,
-        _dentry: FatDentry,
+        _dentry: DentryRepresentation,
         name: String,
         extents: Vec<Range<ClusterIdx>>,
         parent_directory_writer: &mut DryRunDirectoryWriter,
