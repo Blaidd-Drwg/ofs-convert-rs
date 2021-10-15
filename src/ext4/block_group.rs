@@ -135,11 +135,12 @@ impl<'a> BlockGroup<'a> {
         }
     }
 
+    /// PANICS: Panics if `relative_inode_no` is already allocated or is out of bounds.
     pub fn allocate_relative_inode(&mut self, relative_inode_no: InodeCount, inode_size: u16) -> &'a mut InodeInner {
         let mut bitmap = Bitmap { data: self.inode_bitmap };
         assert!(
             !bitmap.get(usize::fromx(relative_inode_no)),
-            "Tried to allocate used inode with relative index {}",
+            "Tried to allocate already used inode with relative index {}",
             relative_inode_no
         );
 

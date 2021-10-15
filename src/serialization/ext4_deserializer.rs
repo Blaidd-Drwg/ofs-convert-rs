@@ -94,14 +94,14 @@ impl<'a> Ext4TreeDeserializerInternals<'a> {
         name: String,
         parent_dentry_writer: &mut DentryWriter,
     ) -> Result<Inode<'a>> {
-        let mut inode = self.ext_fs.allocate_inode(dentry.is_dir);
+        let mut inode = self.ext_fs.allocate_inode(dentry.is_dir)?;
         inode.init_from_dentry(dentry)?;
         parent_dentry_writer.add_dentry(Ext4Dentry::new(inode.inode_no, name)?, &mut self.ext_fs)?;
         Ok(inode)
     }
 
     fn build_lost_found(&mut self, root_dentry_writer: &mut DentryWriter) -> Result<()> {
-        let inode = self.ext_fs.build_lost_found_inode();
+        let inode = self.ext_fs.build_lost_found_inode()?;
         let dentry = Ext4Dentry::new(inode.inode_no, "lost+found".to_string())?;
 
         root_dentry_writer.add_dentry(dentry, &mut self.ext_fs)?;

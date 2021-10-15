@@ -248,6 +248,10 @@ impl SuperBlock {
         Ok(sb)
     }
 
+    pub fn max_inode_no(&self) -> InodeNo {
+        self.s_inodes_count + FIRST_EXISTING_INODE - 1
+    }
+
     // TODO test
     pub fn free_inode_count(&self) -> InodeCount {
         let reserved_inodes_count = FIRST_NON_RESERVED_INODE - FIRST_EXISTING_INODE;

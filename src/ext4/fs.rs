@@ -1,7 +1,7 @@
 use std::convert::TryFrom;
 use std::ops::Range;
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use num::Integer;
 
 use crate::allocator::Allocator;
@@ -126,19 +126,22 @@ impl<'a> Ext4Fs<'a> {
         inode
     }
 
-    pub fn build_lost_found_inode(&mut self) -> Inode<'a> {
-        let mut inode = self.allocate_inode(true);
+    pub fn build_lost_found_inode(&mut self) -> Result<Inode<'a>> {
+        let mut inode = self.allocate_inode(true)?;
         assert_eq!(inode.inode_no, LOST_FOUND_INODE_NO);
         inode.init_lost_found();
-        inode
+        Ok(inode)
     }
 
     /// Inode 11 is not officially reserved for the lost+found directory, but fsck complains if it's not there.
     /// Therefore, the inode returned by the first call to `allocate_inode` should be used for lost+found.
-    pub fn allocate_inode(&mut self, is_dir: bool) -> Inode<'a> {
-        let inode_no = self.next_free_inode_no;
+    pub fn allocate_inode(&mut self, is_dir: bool) -> Result<Inode<'a>> {
         let inode_size = self.superblock().s_inode_size;
+        let inode_no = self.next_free_inode_no;
         self.next_free_inode_no += 1;
+        if inode_no > self.superblock().max_inode_no() {
+            bail!("No free inodes left");
+        }
 
         let existing_inode_no = inode_no - FIRST_EXISTING_INODE;
         let (block_group_idx, relative_inode_no) = existing_inode_no.div_rem(&self.superblock().s_inodes_per_group);
@@ -151,7 +154,7 @@ impl<'a> Ext4Fs<'a> {
             descriptor.increment_used_directory_count();
         }
 
-        Inode { inode_no, inner }
+        Ok(Inode { inode_no, inner })
     }
 }
 

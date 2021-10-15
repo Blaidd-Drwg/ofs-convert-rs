@@ -5,16 +5,19 @@ pub struct Bitmap<'a> {
 }
 
 impl<'a> Bitmap<'a> {
+    /// PANICS: Panics if `idx` out of bounds
     pub fn set(&mut self, idx: usize) {
         let (data_idx, bit_idx) = idx.div_rem(&8);
         self.data[data_idx] |= 1 << bit_idx;
     }
 
+    /// PANICS: Panics if `idx` out of bounds
     pub fn clear(&mut self, idx: usize) {
         let (data_idx, bit_idx) = idx.div_rem(&8);
         self.data[data_idx] &= !(1 << bit_idx);
     }
 
+    /// PANICS: Panics if `idx` out of bounds
     pub fn get(&self, idx: usize) -> bool {
         let (data_idx, bit_idx) = idx.div_rem(&8);
         self.data[data_idx] & (1 << bit_idx) != 0
