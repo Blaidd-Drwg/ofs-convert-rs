@@ -179,7 +179,6 @@ impl SuperBlock {
         let block_bitmap_size = block_size * 8;
         sb.s_blocks_per_group = block_bitmap_size.min(MAX_BLOCKS_PER_GROUP);
 
-        // TODO big dirs, prevent too deep extent trees
         sb.s_magic = SUPERBLOCK_MAGIC;
         sb.s_state = STATE_CLEANLY_UNMOUNTED;
         sb.s_feature_compat = FEATURE_COMPAT_SPARSE_SUPER2;

@@ -97,25 +97,31 @@ unsafe fn ofs_convert(partition_path: &str) -> Result<()> {
     let boot_sector = fat_fs.boot_sector();
     let superblock = SuperBlock::from(boot_sector)?;
 
-    let forbidden_ranges = superblock.block_group_overhead_ranges();
-    let mut forbidden_ranges = into_cluster_idx_ranges(forbidden_ranges);
-    let last_ext_cluster_idx = ClusterIdx::try_from(superblock.block_count_with_padding())
-        .expect("ext4 block count <= FAT32 cluster count, so the index fits into a ClusterIdx");
-    let overhanging_block_range = last_ext_cluster_idx..fat_fs.cluster_count();
-    forbidden_ranges.insert(overhanging_block_range);
+    let forbidden_ranges = forbidden_ranges(&superblock, fat_fs.cluster_count());
     for range in &forbidden_ranges {
         allocator.forbid(range.clone());
     }
 
     let mut serializer = FatTreeSerializer::new(allocator, fat_fs, forbidden_ranges);
     serializer.serialize_directory_tree().context("Serialization failed")?;
-
     let mut deserializer = serializer.into_deserializer().context("A dry run of the conversion failed")?;
 
     deserializer
         .deserialize_directory_tree()
         .context("Conversion failed unexpectedly. The FAT partition may have been left in an inconsistent status.")?;
     Ok(())
+}
+
+/// Returns the ranges of `ClusterIdx`s in the partition described by `superblock` that may not be overwritten with ext4
+/// data.
+fn forbidden_ranges(superblock: &SuperBlock, cluster_count: u32) -> Ranges<ClusterIdx> {
+    let forbidden_ranges = superblock.block_group_overhead_ranges();
+    let mut forbidden_ranges = into_cluster_idx_ranges(forbidden_ranges);
+    let last_ext_cluster_idx = ClusterIdx::try_from(superblock.block_count_with_padding())
+        .expect("ext4 block count <= FAT32 cluster count, so the index fits into a ClusterIdx");
+    let overhanging_block_range = last_ext_cluster_idx..cluster_count;
+    forbidden_ranges.insert(overhanging_block_range);
+    forbidden_ranges
 }
 
 fn into_cluster_idx_ranges(ranges: Ranges<BlockIdx>) -> Ranges<ClusterIdx> {
