@@ -25,58 +25,41 @@ impl<'a> DryRunDeserializer<'a> {
         block_size: BlockSize,
     ) -> Result<()> {
         let mut instance = Self {
-            internals: DryRunDeserializerInternals::new(reader, free_inodes, free_blocks, block_size),
+            internals: DryRunDeserializerInternals::new(reader, block_size),
             _lifetime: PhantomData,
         };
         instance.deserialize_directory_tree()?;
-        instance.internals.result()
+        instance.internals.result(free_inodes, free_blocks)
     }
 }
 
 pub struct DryRunDeserializerInternals<'a> {
     reader: Reader<'a>,
-    free_inodes: InodeCount,
-    free_blocks: BlockCount,
     used_inodes: InodeCount,
     used_blocks: BlockCount,
     block_size: BlockSize,
 }
 
 impl<'a> DryRunDeserializerInternals<'a> {
-    pub fn new(reader: Reader<'a>, free_inodes: InodeCount, free_blocks: BlockCount, block_size: BlockSize) -> Self {
-        Self {
-            reader,
-            free_inodes,
-            free_blocks,
-            used_inodes: 1, // lost+found
-            used_blocks: 1, // lost+found
-            block_size,
-        }
+    pub fn new(reader: Reader<'a>, block_size: BlockSize) -> Self {
+        Self { reader, used_inodes: 0, used_blocks: 0, block_size }
     }
 
     // We perform the entire dry run and return a Result only afterward instead of bailing as soon a we know it will
-    // fail. This is better because it lets the user know how many more inodes/blocks they would need.
-    fn result(&self) -> Result<()> {
-        let enough_inodes = self.used_inodes <= self.free_inodes;
-        let enough_blocks = self.used_blocks <= self.free_blocks;
+    // fail. This is better because it lets the user know the required inode/block count.
+    fn result(&self, free_inodes: InodeCount, free_blocks: BlockCount) -> Result<()> {
+        let enough_inodes = self.used_inodes <= free_inodes;
+        let enough_blocks = self.used_blocks <= free_blocks;
         match (enough_inodes, enough_blocks) {
             (true, true) => Ok(()),
-            (true, false) => bail!(
-                "{} free blocks required but only {} available",
-                self.used_blocks,
-                self.free_blocks
-            ),
-            (false, true) => bail!(
-                "{} free inodes required but only {} available",
-                self.used_inodes,
-                self.free_inodes
-            ),
+            (true, false) => bail!("{} free blocks required but only {} available", self.used_blocks, free_blocks),
+            (false, true) => bail!("{} free inodes required but only {} available", self.used_inodes, free_inodes),
             (false, false) => bail!(
                 "{} free blocks required but only {} available; {} inodes required but only {} available",
                 self.used_blocks,
-                self.free_blocks,
+                free_blocks,
                 self.used_inodes,
-                self.free_inodes
+                free_inodes
             ),
         }
     }
@@ -90,7 +73,10 @@ impl<'a> DeserializerInternals<'a> for DryRunDeserializerInternals<'a> {
     }
 
     fn build_root(&mut self) -> Result<DryRunDirectoryWriter> {
-        Ok(DryRunDirectoryWriter::new(self.block_size))
+        let mut dir_writer = DryRunDirectoryWriter::new(self.block_size);
+        self.used_blocks += dir_writer.add_dot_dirs();
+        self.build_directory("lost+found".to_string(), &mut dir_writer)?;
+        Ok(dir_writer)
     }
 
     fn deserialize_directory(
@@ -99,8 +85,7 @@ impl<'a> DeserializerInternals<'a> for DryRunDeserializerInternals<'a> {
         name: String,
         parent_directory_writer: &mut DryRunDirectoryWriter,
     ) -> Result<DryRunDirectoryWriter> {
-        self.build_file(name, parent_directory_writer)?;
-        Ok(DryRunDirectoryWriter::new(self.block_size))
+        self.build_directory(name, parent_directory_writer)
     }
 
     fn deserialize_regular_file(
@@ -110,17 +95,33 @@ impl<'a> DeserializerInternals<'a> for DryRunDeserializerInternals<'a> {
         extents: Vec<Range<ClusterIdx>>,
         parent_directory_writer: &mut DryRunDirectoryWriter,
     ) -> Result<()> {
-        self.build_file(name, parent_directory_writer)?;
-        self.used_blocks += ExtentTree::required_block_count(extents.len(), self.block_size);
-        Ok(())
+        self.build_regular_file(name, parent_directory_writer, extents)
     }
 }
 
 // TODO test `required_block_count`
 impl<'a> DryRunDeserializerInternals<'a> {
-    fn build_file(&mut self, name: String, parent_directory_writer: &mut DryRunDirectoryWriter) -> Result<()> {
+    fn build_directory(
+        &mut self,
+        name: String,
+        parent_directory_writer: &mut DryRunDirectoryWriter,
+    ) -> Result<DryRunDirectoryWriter> {
+        let mut dir_writer = DryRunDirectoryWriter::new(self.block_size);
         self.used_inodes += 1;
         self.used_blocks += parent_directory_writer.add_dentry(&Ext4Dentry::new(0, name)?);
+        self.used_blocks += dir_writer.add_dot_dirs();
+        Ok(dir_writer)
+    }
+
+    fn build_regular_file(
+        &mut self,
+        name: String,
+        parent_directory_writer: &mut DryRunDirectoryWriter,
+        extents: Vec<Range<ClusterIdx>>,
+    ) -> Result<()> {
+        self.used_inodes += 1;
+        self.used_blocks += parent_directory_writer.add_dentry(&Ext4Dentry::new(0, name)?);
+        self.used_blocks += ExtentTree::required_block_count(extents.len(), self.block_size);
         Ok(())
     }
 }
@@ -142,6 +143,12 @@ impl DryRunDirectoryWriter {
             block_size,
             position_in_block: block_size, // to model the first block being allocated immediately
         }
+    }
+
+    fn add_dot_dirs(&mut self) -> usize {
+        let mut added_blocks = self.add_dentry(&Ext4Dentry::new(0, ".".to_string()).unwrap());
+        added_blocks += self.add_dentry(&Ext4Dentry::new(0, "..".to_string()).unwrap());
+        added_blocks
     }
 
     fn add_dentry(&mut self, dentry: &Ext4Dentry) -> usize {

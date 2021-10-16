@@ -74,8 +74,8 @@ pub struct InodeInner {
 }
 
 impl<'a> Inode<'a> {
-    pub fn init_from_dentry(&mut self, dentry: DentryRepresentation) -> Result<()> {
-        self.inner.init_from_dentry(dentry)
+    pub fn init_from_dentry(&mut self, dentry: DentryRepresentation) {
+        self.inner.init_from_dentry(dentry);
     }
 
     pub fn init_lost_found(&mut self) {
@@ -132,7 +132,7 @@ impl<'a> Inode<'a> {
 }
 
 impl InodeInner {
-    fn init_from_dentry(&mut self, dentry: DentryRepresentation) -> Result<()> {
+    fn init_from_dentry(&mut self, dentry: DentryRepresentation) {
         let user_id = u32::from(geteuid());
         let group_id = u32::from(getegid());
         LoHiMut::new(&mut self.i_uid, &mut self.l_i_uid_high).set(user_id);
@@ -145,7 +145,6 @@ impl InodeInner {
         self.i_links_count = 1;
         self.i_flags = INODE_USES_EXTENTS;
         self.init_extent_header();
-        Ok(())
     }
 
     fn init_lost_found(&mut self) {

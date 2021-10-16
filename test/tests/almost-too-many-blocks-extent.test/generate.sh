@@ -2,12 +2,12 @@
 
 BLOCK_COUNT=1733
 
-# Cause external fragmentation by
+# Create a situation in which creating the extents for the file "bigfile" is the tipping point between the conversion succeeding and failing (i.e. adding one more extent to its extent tree requires the allocation of a block that is not available). We cause external fragmentation (which increases the number of extents for bigfile) by
 #   - filling the disk with small files
 #   - deleting every second file
-#   - filling the space in between with one big file
+#   - filling the space in between with bigfile
 #   - deleting the remaining small files
-#   - filling the rest of the space with the big file
+#   - filling the rest of the space with bigfile
 
 for i in $(seq 1 $BLOCK_COUNT); do
 	dd if=/dev/urandom of="$1/smallfile$i" bs=1024 count=1

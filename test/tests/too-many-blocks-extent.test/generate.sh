@@ -2,7 +2,7 @@
 
 BLOCK_COUNT=1734
 
-# Cause external fragmentation by
+# Create a situation in which creating the extents for the file "bigfile" is the tipping point between the conversion succeeding and failing (i.e. adding the last extent to its extent tree requires the allocation of a block that is not available). We cause external fragmentation (which increases the number of extents for bigfile) by
 #   - filling the disk with small files
 #   - deleting every second file
 #   - filling the space in between with one big file

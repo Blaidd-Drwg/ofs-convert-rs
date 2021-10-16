@@ -95,7 +95,7 @@ impl<'a> Ext4TreeDeserializerInternals<'a> {
         parent_dentry_writer: &mut DentryWriter,
     ) -> Result<Inode<'a>> {
         let mut inode = self.ext_fs.allocate_inode(dentry.is_dir)?;
-        inode.init_from_dentry(dentry)?;
+        inode.init_from_dentry(dentry);
         parent_dentry_writer.add_dentry(Ext4Dentry::new(inode.inode_no, name)?, &mut self.ext_fs)?;
         Ok(inode)
     }
