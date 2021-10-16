@@ -43,7 +43,7 @@ pub trait DeserializerInternals<'a> {
         &mut self,
         dentry: DentryRepresentation,
         name: String,
-        extents: Vec<Range<ClusterIdx>>,
+        data_ranges: Vec<Range<ClusterIdx>>,
         parent_directory_writer: &mut Self::D,
     ) -> Result<()>;
 
@@ -64,8 +64,8 @@ pub trait DeserializerInternals<'a> {
                 }
             }
             FileType::RegularFile => {
-                let extents = self.read_next::<Range<ClusterIdx>>();
-                self.deserialize_regular_file(dentry, name, extents, parent_directory_writer)?;
+                let data_ranges = self.read_next::<Range<ClusterIdx>>();
+                self.deserialize_regular_file(dentry, name, data_ranges, parent_directory_writer)?;
             }
         }
         Ok(())

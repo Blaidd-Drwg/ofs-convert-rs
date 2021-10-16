@@ -60,14 +60,15 @@ impl Extent {
     pub const MAX_LEN: usize = u16::MAX as usize;
 
     /// PANICS: Panics if `range.len() > Extent::MAX_LEN`.
-    pub fn new(range: Range<BlockIdx>, logical_start: u32) -> Self {
+    pub fn new(data_range: Range<BlockIdx>, logical_start: u32) -> Self {
         let mut instance = Self {
             logical_start,
-            len: u16::try_from(range.len()).expect("Attempted to create an extent longer than 65535 blocks"),
+            len: u16::try_from(data_range.len()).expect("Attempted to create an extent longer than 65535 blocks"),
             physical_start_hi: 0,
             physical_start_lo: 0,
         };
-        LoHiMut::new(&mut instance.physical_start_lo, &mut instance.physical_start_hi).set(u64::fromx(range.start));
+        LoHiMut::new(&mut instance.physical_start_lo, &mut instance.physical_start_hi)
+            .set(u64::fromx(data_range.start));
         instance
     }
 
@@ -85,17 +86,16 @@ impl Extent {
     }
 
     // TODO fail dry run when file has more than u32::max blocks
-    pub fn from_ranges<I>(ranges: I) -> Result<Vec<Self>>
+    pub fn from_ranges<I>(data_ranges: I) -> Result<Vec<Self>>
     where I: IntoIterator<Item = Range<BlockIdx>> {
         let mut logical_start = 0u32;
         let mut extents = Vec::new();
-        for mut range in ranges {
+        for mut range in data_ranges {
             while !range.is_empty() {
                 let range_len = range.len().min(Self::MAX_LEN);
                 let range_first_part = range.start..range.start + range_len;
                 extents.push(Self::new(range_first_part, logical_start));
-                logical_start = checked_add(logical_start, range_len)
-                    .context("The size of a file's extents cannot sum up to more than 2^32 blocks")?;
+                logical_start = checked_add(logical_start, range_len).context("File too large")?;
                 range.start += range_len;
             }
         }

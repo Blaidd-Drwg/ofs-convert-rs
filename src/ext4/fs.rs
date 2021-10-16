@@ -71,9 +71,9 @@ impl<'a> Ext4Fs<'a> {
     }
 
     /// Assumes that `inode` currently has no extents.
-    pub fn set_extents<I>(&mut self, inode: &mut Inode, ranges: I, allocator: &Allocator<'_>) -> Result<()>
+    pub fn set_extents<I>(&mut self, inode: &mut Inode, data_ranges: I, allocator: &Allocator<'_>) -> Result<()>
     where I: IntoIterator<Item = Range<BlockIdx>> {
-        for extent in Extent::from_ranges(ranges)? {
+        for extent in Extent::from_ranges(data_ranges)? {
             self.register_extent(inode, extent, allocator)?;
         }
         Ok(())

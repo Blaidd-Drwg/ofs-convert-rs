@@ -26,7 +26,7 @@ impl<'a> Ext4TreeDeserializer<'a> {
     }
 
     pub fn new_with_dry_run(reader: Reader<'a>, allocator: Allocator<'a>, fat_fs: FatFs<'a>) -> Result<Self> {
-        let free_inodes = SuperBlock::from(fat_fs.boot_sector())?.free_inode_count();
+        let free_inodes = SuperBlock::from(fat_fs.boot_sector())?.allocatable_inode_count();
         let free_blocks = allocator.free_block_count();
         DryRunDeserializer::dry_run(reader.clone(), free_inodes, free_blocks, fat_fs.cluster_size())?;
         Ok(Self::new(reader, allocator, fat_fs.into_ext4()?))
@@ -66,14 +66,14 @@ impl<'a> DeserializerInternals<'a> for Ext4TreeDeserializerInternals<'a> {
         &mut self,
         dentry: DentryRepresentation,
         name: String,
-        extents: Vec<Range<ClusterIdx>>,
+        data_ranges: Vec<Range<ClusterIdx>>,
         parent_directory_writer: &mut DentryWriter,
     ) -> Result<()> {
         let mut inode = self.build_file(dentry, name, parent_directory_writer)?;
-        let extent_iter = extents
+        let data_ranges_iter = data_ranges
             .into_iter()
             .map(|range| BlockIdx::fromx(range.start)..BlockIdx::fromx(range.end));
-        self.ext_fs.set_extents(&mut inode, extent_iter, &self.allocator)?;
+        self.ext_fs.set_extents(&mut inode, data_ranges_iter, &self.allocator)?;
         inode.set_size(u64::from(dentry.file_size));
         Ok(())
     }
