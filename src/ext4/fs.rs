@@ -1,7 +1,7 @@
 use std::convert::TryFrom;
 use std::ops::Range;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use num::Integer;
 
 use crate::allocator::Allocator;

@@ -57,7 +57,7 @@ pub struct SuperBlock {
     pub s_log_cluster_size: u32,
     pub s_blocks_per_group: u32, // max value: 65528
     pub s_clusters_per_group: u32,
-    pub s_inodes_per_group: u32,
+    pub s_inodes_per_group: u32, // max value: 524288
     pub s_mtime: u32,
     pub s_wtime: u32,
     pub s_mnt_count: u16,
@@ -165,6 +165,7 @@ impl SuperBlock {
         // CAUTION: some initialization steps rely on other fields already having been set,
         // so pay attention when refactoring/reordering steps.
         let mut sb: Self = unsafe { std::mem::zeroed() };
+        sb.init_constants();
 
         if block_size < MIN_BLOCK_SIZE {
             bail!("The FAT filesystem's cluster size must be >= 1 KiB");
@@ -179,36 +180,18 @@ impl SuperBlock {
         let block_bitmap_size = block_size * 8;
         sb.s_blocks_per_group = block_bitmap_size.min(MAX_BLOCKS_PER_GROUP);
 
-        sb.s_magic = SUPERBLOCK_MAGIC;
-        sb.s_state = STATE_CLEANLY_UNMOUNTED;
-        sb.s_feature_compat = FEATURE_COMPAT_SPARSE_SUPER2;
-        sb.s_feature_incompat = FEATURE_INCOMPAT_64BIT | FEATURE_INCOMPAT_EXTENTS | FEATURE_INCOMPAT_LARGEDIR;
-        sb.s_feature_ro_compat = FEATURE_RO_COMPAT_LARGE_FILES | FEATURE_RO_COMPAT_DIR_NLINK;
-        sb.s_desc_size = DESC_SIZE_64BIT;
-        sb.s_inode_size = INODE_SIZE;
-        sb.s_rev_level = NEWEST_REVISION;
-        sb.s_errors = ERRORS_DEFAULT;
-        sb.s_first_ino = FIRST_NON_RESERVED_INODE;
-        sb.s_max_mnt_count = u16::MAX;
         sb.s_mkfs_time = u32::try_from(chrono::Utc::now().timestamp()).unwrap();
         sb.s_uuid = *Uuid::new_v4().as_bytes();
         sb.s_volume_name[0..volume_label.len()].clone_from_slice(volume_label);
 
-        // These have to have these values even if bigalloc is disabled
+        // These two fields have to have these values even if bigalloc is disabled
         sb.s_log_cluster_size = sb.s_log_block_size;
         sb.s_clusters_per_group = sb.s_blocks_per_group;
 
-        // TODO how do we decide number of inodes? (ipg)
-        // This is the same logic as used by mke2fs to determine the inode count
         let inode_bitmap_size = block_size * 8;
         let heuristic_inodes_per_group = sb.s_blocks_per_group * block_size / INODE_RATIO;
         sb.s_inodes_per_group = inode_bitmap_size.min(heuristic_inodes_per_group);
 
-        // Same logic as used in mke2fs: If the last block group would have fewer than 50 data blocks, then reduce the
-        // block count and ignore the remaining space
-        // For some reason in tests we found that mkfs.ext4 didn't follow this logic and instead set sb.blocks_per_group
-        // to a value lower than `block_size` * 8, but this is easier to implement.
-        // We use the sparse_super2 logic from mke2fs, meaning that the last block group always has a super block copy.
         let mut block_count = fs_len / BlockCount::fromx(block_size);
         let mut data_block_count = block_count - BlockCount::fromx(sb.s_first_data_block);
         // set the intermediate value in `sb` because it is needed by the call to `sb.block_group_overhead`.
@@ -218,6 +201,7 @@ impl SuperBlock {
         // `s_reserved_gdt_blocks`, `s_log_block_size`, `s_desc_size`, `s_inodes_per_group`, `s_inode_size`,
         // `s_blocks_per_group`, `s_blocks_count_hi` and `s_blocks_count_lo` must have a value before this call
         if last_group_block_count < sb.block_group_overhead(HasSuperBlock::YesBackup) + MIN_USABLE_BLOCKS_PER_GROUP {
+            // exclude last blocks in partition from the filesystem
             block_count -= last_group_block_count;
             data_block_count -= last_group_block_count;
             LoHiMut::new(&mut sb.s_blocks_count_lo, &mut sb.s_blocks_count_hi).set(u64::fromx(block_count));
@@ -230,13 +214,15 @@ impl SuperBlock {
             );
         }
 
-        // Same logic as in mke2fs
         let block_group_count = data_block_count.div_ceil(BlockCount::fromx(sb.s_blocks_per_group));
         let block_group_count = BlockGroupCount::try_from(block_group_count)
             // This can only happen with absurdly large filesystems in the petabye range
             .context("Filesystem too large, it would have more than 2^32 block groups.")?;
-        sb.s_inodes_count = sb.s_inodes_per_group * block_group_count;
-        // TODO overflow?
+        sb.s_inodes_count = sb
+            .s_inodes_per_group
+            .checked_mul(block_group_count)
+            // Slightly more realistic, possible with filesystems in the terabye range
+            .context("Too many inodes, at most 2^32 are allowed.")?;
 
         if block_group_count > 1 {
             sb.s_backup_bgs[0] = 1;
@@ -247,11 +233,24 @@ impl SuperBlock {
         Ok(sb)
     }
 
+    fn init_constants(&mut self) {
+        self.s_magic = SUPERBLOCK_MAGIC;
+        self.s_state = STATE_CLEANLY_UNMOUNTED;
+        self.s_feature_compat = FEATURE_COMPAT_SPARSE_SUPER2;
+        self.s_feature_incompat = FEATURE_INCOMPAT_64BIT | FEATURE_INCOMPAT_EXTENTS | FEATURE_INCOMPAT_LARGEDIR;
+        self.s_feature_ro_compat = FEATURE_RO_COMPAT_LARGE_FILES | FEATURE_RO_COMPAT_DIR_NLINK;
+        self.s_desc_size = DESC_SIZE_64BIT;
+        self.s_inode_size = INODE_SIZE;
+        self.s_rev_level = NEWEST_REVISION;
+        self.s_errors = ERRORS_DEFAULT;
+        self.s_first_ino = FIRST_NON_RESERVED_INODE;
+        self.s_max_mnt_count = u16::MAX;
+    }
+
     pub fn max_inode_no(&self) -> InodeNo {
         self.s_inodes_count + FIRST_EXISTING_INODE - 1
     }
 
-    // TODO test
     pub fn allocatable_inode_count(&self) -> InodeCount {
         let reserved_inodes_count = FIRST_NON_RESERVED_INODE - FIRST_EXISTING_INODE;
         self.s_inodes_count - reserved_inodes_count
