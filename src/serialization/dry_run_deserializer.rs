@@ -16,9 +16,12 @@ pub type DryRunDeserializer<'a> = Deserializer<'a, DryRunDeserializerInternals<'
 /// A mock version of `Ext4TreeDeserializer` which triggers all cases in which the actual deserializer would bail
 /// mid-conversion, leaving the file system inconsistent. Running `DryRunDeserializer` does not mutate the partition.
 /// The errors that will be caught are:
-/// - File name too long
-/// - Insufficient free space in file system
+/// - Insufficient free blocks to create an extent tree
+/// - Insufficient free blocks to create a dentry
 /// - Insufficient free inodes in the new ext4 file system
+/// - File name too long
+/// - Regular file has more than u32::MAX blocks
+/// - Directory has more than u32::MAX blocks
 impl<'a> DryRunDeserializer<'a> {
     pub fn dry_run(
         reader: Reader<'a>,

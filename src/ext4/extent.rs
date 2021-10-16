@@ -85,7 +85,6 @@ impl Extent {
         self.start()..self.end()
     }
 
-    // TODO fail dry run when file has more than u32::max blocks
     pub fn from_ranges<I>(data_ranges: I) -> Result<Vec<Self>>
     where I: IntoIterator<Item = Range<BlockIdx>> {
         let mut logical_start = 0u32;

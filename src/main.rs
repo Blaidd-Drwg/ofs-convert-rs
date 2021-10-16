@@ -34,7 +34,6 @@ const_assert!(size_of::<usize>() <= size_of::<u64>());
 // TODO how does Ubuntu FAT driver handle timezones?
 // TODO what can overflow?
 // TODO convention: expect messages
-// TODO exhaustively enumerate failures during deserialization and make sure they are caught in the dry run
 // TODO allow manually increasing number of inodes
 // TODO sometimes using Result where Option would be more idiomatic
 // TODO add context to Errs
@@ -110,13 +109,12 @@ unsafe fn ofs_convert(partition_path: &str) -> Result<()> {
 
     let mut serializer = FatTreeSerializer::new(allocator, fat_fs, forbidden_ranges);
     serializer.serialize_directory_tree().context("Serialization failed")?;
-    // TODO differentiate FAT consistent/inconsistent errors
 
     let mut deserializer = serializer.into_deserializer().context("A dry run of the conversion failed")?;
 
-    // If we fail before this step the FAT filesystem is still consistent
-    deserializer.deserialize_directory_tree().context("Conversion failed")?;
-
+    deserializer
+        .deserialize_directory_tree()
+        .context("Conversion failed unexpectedly. The FAT partition may have been left in an inconsistent status.")?;
     Ok(())
 }
 

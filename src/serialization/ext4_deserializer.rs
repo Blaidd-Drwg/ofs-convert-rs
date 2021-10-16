@@ -33,6 +33,14 @@ impl<'a> Ext4TreeDeserializer<'a> {
     }
 }
 
+// It is mandatory that `deserialize_directory_tree` does not fail, as bailing mid-conversion will likely result in a
+// corrupted FAT32 filesystem. The identified reasons for failure (excluding bugs) are:
+// - Insufficient free blocks to create an extent tree
+// - Insufficient free blocks to create a dentry
+// - Insufficient free inodes in the new ext4 file system
+// - File name too long
+// - Regular file has more than u32::MAX blocks
+// - Directory has more than u32::MAX blocks
 pub struct Ext4TreeDeserializerInternals<'a> {
     allocator: Rc<Allocator<'a>>,
     reader: Reader<'a>,
