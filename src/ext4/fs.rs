@@ -112,20 +112,14 @@ impl<'a> Ext4Fs<'a> {
         self.block_groups[usize::fromx(block_group_idx)].mark_relative_range_as_used(relative_range);
     }
 
-    pub unsafe fn build_root_inode(&mut self) -> Inode<'a> {
-        let inode_no = ROOT_INODE_NO;
-        let existing_inode_no = inode_no - FIRST_EXISTING_INODE;
-        let inode_size = self.superblock().s_inode_size;
-        let inner = self.block_groups[0].get_relative_inode(existing_inode_no, inode_size);
-        let mut inode = Inode { inode_no, inner };
+    /// PANICS: Panics if called multiple times
+    pub fn build_root_inode(&mut self) -> Inode<'a> {
+        let mut inode = self.allocate_inode_with_no(ROOT_INODE_NO, true);
         inode.init_root();
-
-        let descriptor = &mut self.group_descriptor_table_mut()[0];
-        // root inode is reserved and already marked as not free, no need to decrement count
-        descriptor.increment_used_directory_count();
         inode
     }
 
+    /// PANICS: Panics if called multiple times
     pub fn build_lost_found_inode(&mut self) -> Result<Inode<'a>> {
         let mut inode = self.allocate_inode(true)?;
         assert_eq!(inode.inode_no, LOST_FOUND_INODE_NO);
@@ -136,15 +130,20 @@ impl<'a> Ext4Fs<'a> {
     /// Inode 11 is not officially reserved for the lost+found directory, but fsck complains if it's not there.
     /// Therefore, the inode returned by the first call to `allocate_inode` should be used for lost+found.
     pub fn allocate_inode(&mut self, is_dir: bool) -> Result<Inode<'a>> {
-        let inode_size = self.superblock().s_inode_size;
         let inode_no = self.next_free_inode_no;
         self.next_free_inode_no += 1;
         if inode_no > self.superblock().max_inode_no() {
             bail!("No free inodes left");
         }
+        Ok(self.allocate_inode_with_no(inode_no, is_dir))
+    }
 
+    /// PANICS: Panics if an inode with number `inode_no` was already allocated or does not exist.
+    fn allocate_inode_with_no(&mut self, inode_no: InodeNo, is_dir: bool) -> Inode<'a> {
+        let inode_size = self.superblock().s_inode_size;
         let existing_inode_no = inode_no - FIRST_EXISTING_INODE;
         let (block_group_idx, relative_inode_no) = existing_inode_no.div_rem(&self.superblock().s_inodes_per_group);
+
         let block_group = &mut self.block_groups[usize::fromx(block_group_idx)];
         let inner = block_group.allocate_relative_inode(relative_inode_no, inode_size);
 
@@ -154,7 +153,7 @@ impl<'a> Ext4Fs<'a> {
             descriptor.increment_used_directory_count();
         }
 
-        Ok(Inode { inode_no, inner })
+        Inode { inode_no, inner }
     }
 }
 

@@ -1,4 +1,6 @@
-use crate::ext4::{Ext4BlockGroupConstructionInfo, InodeCount};
+use std::convert::TryFrom;
+
+use crate::ext4::{Ext4BlockGroupConstructionInfo, InodeCount, SPECIAL_INODES};
 use crate::lohi::{LoHi, LoHiMut};
 use crate::util::FromUsize;
 
@@ -35,7 +37,12 @@ impl Ext4GroupDescriptor {
         let block_bitmap_block = u64::fromx(info.start_block + info.relative_block_bitmap_block);
         let inode_bitmap_block = u64::fromx(info.start_block + info.relative_inode_bitmap_block);
         let inode_table_start_block = u64::fromx(info.start_block + info.relative_inode_table_start_block);
-        let free_inodes_count = info.inodes_count - info.reserved_inode_count;
+        let special_inode_count = if info.is_first_block_group {
+            u32::try_from(SPECIAL_INODES.len()).unwrap()
+        } else {
+            0
+        };
+        let free_inodes_count = info.inodes_count - special_inode_count;
         let free_blocks_count = info.blocks_count - info.overhead;
 
         let mut instance = Self::default(); // zero every field

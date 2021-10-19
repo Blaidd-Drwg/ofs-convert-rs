@@ -18,6 +18,8 @@ pub use self::superblock::*;
 /// block is padding, and the first block group starts with the second block.
 pub const FIRST_BLOCK_PADDING: usize = 1024;
 
+/// These inode numbers don't correspond to an actual file.
+pub const SPECIAL_INODES: [InodeNo; 9] = [1, 3, 4, 5, 6, 7, 8, 9, 10];
 /// There is no inode with inode_no 0.
 pub const FIRST_EXISTING_INODE: InodeNo = 1;
 pub const FIRST_NON_RESERVED_INODE: InodeNo = 11;

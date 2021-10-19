@@ -51,7 +51,7 @@ impl<'a> DeserializerInternals<'a> for Ext4TreeDeserializerInternals<'a> {
     type D = DentryWriter<'a>;
 
     fn build_root(&mut self) -> Result<DentryWriter<'a>> {
-        let root_inode = unsafe { self.ext_fs.build_root_inode() };
+        let root_inode = self.ext_fs.build_root_inode();
         let mut dentry_writer = DentryWriter::new(root_inode, Rc::clone(&self.allocator), &mut self.ext_fs)?;
         self.build_root_dot_dirs(&mut dentry_writer)?;
         self.build_lost_found(&mut dentry_writer)?;

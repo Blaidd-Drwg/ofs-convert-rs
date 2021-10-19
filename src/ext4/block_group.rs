@@ -4,7 +4,7 @@ use std::slice;
 use crate::bitmap::Bitmap;
 use crate::ext4::{
     BlockCount, BlockGroupIdx, BlockIdx, BlockSize, Ext4GroupDescriptor, HasSuperBlock, InodeCount, InodeInner,
-    SuperBlock, FIRST_BLOCK_PADDING, FIRST_EXISTING_INODE, FIRST_NON_RESERVED_INODE,
+    SuperBlock, FIRST_BLOCK_PADDING, FIRST_EXISTING_INODE, SPECIAL_INODES,
 };
 use crate::util::FromU32;
 
@@ -96,13 +96,19 @@ impl<'a> BlockGroup<'a> {
         inode_bitmap.fill(0);
 
         let mut bitmap = Bitmap { data: inode_bitmap };
-        for used_inode_idx in 0..usize::fromx(info.reserved_inode_count) {
-            bitmap.set(used_inode_idx);
+        if info.is_first_block_group {
+            Self::mark_special_inodes_as_used(&mut bitmap);
         }
         for nonexistent_inode_idx in usize::fromx(info.inodes_count)..bitmap.len() {
             bitmap.set(nonexistent_inode_idx);
         }
         inode_bitmap
+    }
+
+    fn mark_special_inodes_as_used(inode_bitmap: &mut Bitmap) {
+        for used_inode_idx in SPECIAL_INODES {
+            inode_bitmap.set(usize::fromx(used_inode_idx - FIRST_EXISTING_INODE));
+        }
     }
 
     unsafe fn init_inode_table(block_group_ptr: *mut u8, info: Ext4BlockGroupConstructionInfo) -> (*mut u8, usize) {
@@ -145,11 +151,12 @@ impl<'a> BlockGroup<'a> {
         );
 
         bitmap.set(usize::fromx(relative_inode_no));
+        // SAFETY: Safe since the bitmap ensures we don't use the same `relative_inode_no` twice.
         unsafe { self.get_relative_inode(relative_inode_no, inode_size) }
     }
 
     /// SAFETY: Undefined behavior if the function is called twice with the same `relative_inode_no`.
-    pub unsafe fn get_relative_inode(&mut self, relative_inode_no: InodeCount, inode_size: u16) -> &'a mut InodeInner {
+    unsafe fn get_relative_inode(&mut self, relative_inode_no: InodeCount, inode_size: u16) -> &'a mut InodeInner {
         let offset = usize::fromx(relative_inode_no) * usize::from(inode_size);
         assert!(offset + usize::from(inode_size) <= self.inode_table_len);
         let ptr = self.inode_table_ptr.add(offset) as *mut InodeInner;
@@ -181,7 +188,7 @@ pub struct Ext4BlockGroupConstructionInfo {
     pub inode_table_block_count: BlockCount,
     pub superblock_construction_info: SuperBlockConstructionInfo,
     pub block_size: BlockSize,
-    pub reserved_inode_count: InodeCount,
+    pub is_first_block_group: bool,
     pub overhead: BlockCount,
 }
 
@@ -220,11 +227,7 @@ impl Ext4BlockGroupConstructionInfo {
             superblock_construction_info,
             block_size: superblock.block_size(),
             overhead: superblock.block_group_overhead(has_superblock),
-            reserved_inode_count: if block_group_idx == 0 {
-                FIRST_NON_RESERVED_INODE - FIRST_EXISTING_INODE
-            } else {
-                0
-            },
+            is_first_block_group: block_group_idx == 0,
         }
     }
 }
