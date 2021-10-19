@@ -223,6 +223,12 @@ impl SuperBlock {
             .checked_mul(block_group_count)
             // Slightly more realistic, possible with filesystems in the terabye range
             .context("Too many inodes, at most 2^32 are allowed.")?;
+        if sb.s_inodes_count < FIRST_NON_RESERVED_INODE - FIRST_EXISTING_INODE {
+            bail!(
+                "Too few inodes, at least {} required",
+                FIRST_NON_RESERVED_INODE - FIRST_EXISTING_INODE
+            );
+        }
 
         if block_group_count > 1 {
             sb.s_backup_bgs[0] = 1;
