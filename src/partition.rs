@@ -90,7 +90,7 @@ impl<'a> Partition<'a> {
 // TODO test block device
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
+    use std::io::{self, Write};
 
     use tempfile::NamedTempFile;
 
@@ -124,7 +124,7 @@ mod tests {
         assert!(!Path::new(filename).exists());
         let partition = Partition::open(filename);
         assert!(partition.is_err());
-        assert!(partition.err().unwrap().kind() == io::ErrorKind::NotFound);
+        assert!(io_error_kind(partition.err().unwrap()) == io::ErrorKind::NotFound);
     }
 
     #[test]
@@ -136,7 +136,7 @@ mod tests {
 
         let partition = Partition::open(tmp_file.path());
         assert!(partition.is_err());
-        assert!(partition.err().unwrap().kind() == io::ErrorKind::PermissionDenied);
+        assert!(io_error_kind(partition.err().unwrap()) == io::ErrorKind::PermissionDenied);
     }
 
     #[test]
@@ -172,5 +172,9 @@ mod tests {
     #[test]
     fn has_working_mmap() {
         unimplemented!()
+    }
+
+    fn io_error_kind(err: anyhow::Error) -> io::ErrorKind {
+        err.chain().next().unwrap().downcast_ref::<io::Error>().unwrap().kind()
     }
 }

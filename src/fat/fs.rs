@@ -187,7 +187,7 @@ mod tests {
 
     #[test]
     fn iterates_over_dir_content() {
-        static EXPECTED_FILE_NAMES: [&str; 20] = [
+        const EXPECTED_FILE_NAMES: [&str; 20] = [
             "a",
             "adfdfafd",
             "asda",
@@ -212,10 +212,10 @@ mod tests {
         let expected_file_names = HashSet::from_iter(EXPECTED_FILE_NAMES.iter().map(|s| s.to_string()));
 
         let mut partition = Partition::open("examples/fat.master.bak").unwrap();
-        unsafe {
-            let fat_fs = FatFs::new(partition.as_mut_slice());
-            let file_names: HashSet<_> = fat_fs.dir_content_iter(ROOT_FAT_IDX).map(|file| file.name).collect();
-            assert_eq!(file_names, expected_file_names);
-        }
+        let file_names: HashSet<_> = unsafe {
+            let fat_fs = FatFs::new(partition.as_mut_ptr(), partition.len(), PhantomData).unwrap();
+            fat_fs.dir_content_iter(ROOT_FAT_IDX).map(|file| file.name).collect()
+        };
+        assert_eq!(file_names, expected_file_names);
     }
 }
