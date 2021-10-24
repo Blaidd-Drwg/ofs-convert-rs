@@ -43,15 +43,14 @@ impl<'a> BlockGroup<'a> {
         info: Ext4BlockGroupConstructionInfo,
     ) -> Option<&'a mut SuperBlock> {
         match info.superblock_construction_info {
-            SuperBlockConstructionInfo::YesOriginal { superblock_start_byte, .. } | SuperBlockConstructionInfo::YesBackup { superblock_start_byte, .. } => {
+            SuperBlockConstructionInfo::Yes { superblock_start_byte, .. } => {
                 let metadata_blocks = std::mem::take(block_group_metadata);
                 let (block_containing_superblock, remaining_blocks) =
-                    metadata_blocks.split_at_mut(usize::fromx(info.block_size));
+                    Self::split_at_block_mut(metadata_blocks, 1, info);
                 *block_group_metadata = remaining_blocks;
                 // SAFETY: TODO
-                let (before, superblock, _) = unsafe {
-                    block_containing_superblock[superblock_start_byte..].align_to_mut::<SuperBlock>()
-                };
+                let (before, superblock, _) =
+                    unsafe { block_containing_superblock[superblock_start_byte..].align_to_mut::<SuperBlock>() };
                 assert!(before.is_empty());
                 Some(&mut superblock[0])
             }
@@ -64,18 +63,15 @@ impl<'a> BlockGroup<'a> {
         info: Ext4BlockGroupConstructionInfo,
     ) -> Option<&'a mut [Ext4GroupDescriptor]> {
         match info.superblock_construction_info {
-            SuperBlockConstructionInfo::YesOriginal { group_descriptor_len, .. }
-            | SuperBlockConstructionInfo::YesBackup { group_descriptor_len, .. } => {
-                let gdt_size = size_of::<Ext4GroupDescriptor>() * group_descriptor_len;
-                let gdt_blocks_size = gdt_size.next_multiple_of(usize::fromx(info.block_size));
+            SuperBlockConstructionInfo::Yes { group_descriptor_count, .. } => {
+                let gdt_size = size_of::<Ext4GroupDescriptor>() * group_descriptor_count;
+                let gdt_blocks_count = gdt_size.div_ceil(usize::fromx(info.block_size));
                 let metadata_blocks = std::mem::take(block_group_metadata);
-                let (gdt_blocks, remaining_blocks) = metadata_blocks.split_at_mut(gdt_blocks_size);
+                let (gdt_blocks, remaining_blocks) = Self::split_at_block_mut(metadata_blocks, gdt_blocks_count, info);
                 *block_group_metadata = remaining_blocks;
                 // SAFETY: TODO
-                let (before, mut gdt, _) = unsafe {
-                    gdt_blocks.align_to_mut::<Ext4GroupDescriptor>()
-                };
-                gdt = &mut gdt[..group_descriptor_len];
+                let (before, mut gdt, _) = unsafe { gdt_blocks.align_to_mut::<Ext4GroupDescriptor>() };
+                gdt = &mut gdt[..group_descriptor_count];
                 assert!(before.is_empty());
                 Some(gdt)
             }
@@ -88,7 +84,7 @@ impl<'a> BlockGroup<'a> {
         info: Ext4BlockGroupConstructionInfo,
     ) -> Bitmap<'a> {
         let metadata_blocks = std::mem::take(block_group_metadata);
-        let (bitmap_bytes, remaining_blocks) = metadata_blocks.split_at_mut(usize::fromx(info.block_size));
+        let (bitmap_bytes, remaining_blocks) = Self::split_at_block_mut(metadata_blocks, 1, info);
         *block_group_metadata = remaining_blocks;
 
         let mut bitmap = Bitmap { data: bitmap_bytes };
@@ -107,7 +103,7 @@ impl<'a> BlockGroup<'a> {
         info: Ext4BlockGroupConstructionInfo,
     ) -> Bitmap<'a> {
         let metadata_blocks = std::mem::take(block_group_metadata);
-        let (bitmap_bytes, remaining_blocks) = metadata_blocks.split_at_mut(usize::fromx(info.block_size));
+        let (bitmap_bytes, remaining_blocks) = Self::split_at_block_mut(metadata_blocks, 1, info);
         *block_group_metadata = remaining_blocks;
 
         let mut bitmap = Bitmap { data: bitmap_bytes };
@@ -132,11 +128,19 @@ impl<'a> BlockGroup<'a> {
         info: Ext4BlockGroupConstructionInfo,
     ) -> (*mut u8, usize) {
         let metadata_blocks = std::mem::take(block_group_metadata);
-        let (table, remaining_blocks) =
-            metadata_blocks.split_at_mut(usize::fromx(info.block_size) * info.inode_table_block_count);
+        let (table, remaining_blocks) = Self::split_at_block_mut(metadata_blocks, info.inode_table_block_count, info);
         *block_group_metadata = remaining_blocks;
         table.fill(0);
         (table.as_mut_ptr(), table.len())
+    }
+
+    fn split_at_block_mut(
+        slice: &mut [u8],
+        mid: BlockCount,
+        info: Ext4BlockGroupConstructionInfo,
+    ) -> (&mut [u8], &mut [u8]) {
+        let mid_byte = mid * usize::fromx(info.block_size);
+        slice.split_at_mut(mid_byte)
     }
 
     pub fn mark_relative_range_as_used(&mut self, relative_range: Range<BlockIdx>) {
@@ -169,12 +173,8 @@ impl<'a> BlockGroup<'a> {
 
 #[derive(Clone, Copy, Debug)]
 pub enum SuperBlockConstructionInfo {
-    YesOriginal {
-        group_descriptor_len: usize,
-        superblock_start_byte: usize,
-    },
-    YesBackup {
-        group_descriptor_len: usize,
+    Yes {
+        group_descriptor_count: usize,
         superblock_start_byte: usize,
     },
     No,
@@ -183,9 +183,9 @@ pub enum SuperBlockConstructionInfo {
 #[derive(Clone, Copy, Debug)]
 pub struct Ext4BlockGroupConstructionInfo {
     pub start_block: BlockIdx,
-    pub relative_block_bitmap_block: BlockCount,
-    pub relative_inode_bitmap_block: BlockCount,
-    pub relative_inode_table_start_block: BlockCount,
+    pub block_bitmap_block: BlockCount,
+    pub inode_bitmap_block: BlockCount,
+    pub inode_table_start_block: BlockCount,
     pub blocks_count: BlockCount,
     pub inodes_count: InodeCount,
     pub inode_table_block_count: BlockCount,
@@ -199,9 +199,10 @@ impl Ext4BlockGroupConstructionInfo {
     pub fn new(superblock: &SuperBlock, block_group_idx: BlockGroupIdx) -> Self {
         let has_superblock = superblock.block_group_has_superblock(block_group_idx);
 
-        let relative_block_bitmap_block = superblock.superblock_copy_overhead(has_superblock);
-        let relative_inode_bitmap_block = relative_block_bitmap_block + 1;
-        let relative_inode_table_start_block = relative_inode_bitmap_block + 1;
+        let start_block = superblock.block_group_start_block(block_group_idx);
+        let block_bitmap_block = start_block + superblock.superblock_copy_overhead(has_superblock);
+        let inode_bitmap_block = block_bitmap_block + 1;
+        let inode_table_start_block = inode_bitmap_block + 1;
 
         let max_block_count = superblock.block_count_without_padding()
             - usize::fromx(block_group_idx) * usize::fromx(superblock.s_blocks_per_group);
@@ -209,21 +210,21 @@ impl Ext4BlockGroupConstructionInfo {
 
         let superblock_construction_info = match has_superblock {
             HasSuperBlock::No => SuperBlockConstructionInfo::No,
-            HasSuperBlock::YesOriginal => SuperBlockConstructionInfo::YesOriginal {
-                group_descriptor_len: BlockCount::fromx(superblock.block_group_count()),
+            HasSuperBlock::YesOriginal => SuperBlockConstructionInfo::Yes {
                 superblock_start_byte: superblock.start_byte_within_block(),
+                group_descriptor_count: BlockCount::fromx(superblock.block_group_count()),
             },
-            HasSuperBlock::YesBackup => SuperBlockConstructionInfo::YesBackup {
-                group_descriptor_len: BlockCount::fromx(superblock.block_group_count()),
+            HasSuperBlock::YesBackup => SuperBlockConstructionInfo::Yes {
                 superblock_start_byte: 0,
+                group_descriptor_count: BlockCount::fromx(superblock.block_group_count()),
             },
         };
 
         Self {
-            start_block: superblock.block_group_start_block(block_group_idx),
-            relative_block_bitmap_block,
-            relative_inode_bitmap_block,
-            relative_inode_table_start_block,
+            start_block,
+            block_bitmap_block,
+            inode_bitmap_block,
+            inode_table_start_block,
             blocks_count,
             inodes_count: superblock.s_inodes_per_group,
             inode_table_block_count: superblock.inode_table_block_count(),

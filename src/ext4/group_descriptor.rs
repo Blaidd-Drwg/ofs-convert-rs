@@ -34,9 +34,9 @@ pub struct Ext4GroupDescriptor {
 
 impl Ext4GroupDescriptor {
     pub fn new(info: Ext4BlockGroupConstructionInfo) -> Self {
-        let block_bitmap_block = u64::fromx(info.start_block + info.relative_block_bitmap_block);
-        let inode_bitmap_block = u64::fromx(info.start_block + info.relative_inode_bitmap_block);
-        let inode_table_start_block = u64::fromx(info.start_block + info.relative_inode_table_start_block);
+        let block_bitmap_block = u64::fromx(info.block_bitmap_block);
+        let inode_bitmap_block = u64::fromx(info.inode_bitmap_block);
+        let inode_table_start_block = u64::fromx(info.inode_table_start_block);
         let special_inode_count = if info.is_first_block_group {
             u32::try_from(SPECIAL_INODES.len()).unwrap()
         } else {
