@@ -20,8 +20,8 @@ pub struct Ext4Fs<'a> {
 
 impl<'a> Ext4Fs<'a> {
     /// SAFETY: Safe if `partition_ptr` is valid for reads for `boot_sector.partition_len()` many bytes, and no memory
-    /// belonging to a blocks in `superblock.block_group_overhead_ranges()` is dereferenced for the duration of the
-    /// lifetime `'a`.
+    /// belonging to a block in `superblock.block_group_overhead_ranges()` is dereferenced for the duration of the
+    /// lifetime `'a` by someone other than `self`.
     pub unsafe fn from(partition_ptr: *mut u8, boot_sector: &BootSector) -> Result<Self> {
         let superblock = SuperBlock::from(boot_sector)?;
         let mut block_groups = Vec::new();
@@ -30,8 +30,12 @@ impl<'a> Ext4Fs<'a> {
         for block_group_idx in 0..superblock.block_group_count() {
             let info = Ext4BlockGroupConstructionInfo::new(&superblock, block_group_idx);
             block_group_descriptors.push(Ext4GroupDescriptor::new(info));
-            // SAFETY: TODO
-            block_groups.push(BlockGroup::new(partition_ptr, info));
+            let block_group_ptr = partition_ptr.add(info.start_block * usize::fromx(info.block_size));
+            let metadata_len = usize::fromx(superblock.block_size())
+                * superblock.block_group_overhead(superblock.block_group_has_superblock(block_group_idx));
+            let metadata = std::slice::from_raw_parts_mut(block_group_ptr, metadata_len);
+            // SAFETY: TODO Safe because `info` describes a consistent block group whose memory is within
+            block_groups.push(BlockGroup::new(metadata, info));
         }
 
         *block_groups[0]

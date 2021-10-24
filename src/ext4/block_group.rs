@@ -1,10 +1,11 @@
+use std::mem::size_of;
 use std::ops::Range;
 use std::slice;
 
 use crate::bitmap::Bitmap;
 use crate::ext4::{
     BlockCount, BlockGroupIdx, BlockIdx, BlockSize, Ext4GroupDescriptor, HasSuperBlock, InodeCount, InodeInner,
-    SuperBlock, FIRST_BLOCK_PADDING, FIRST_EXISTING_INODE, SPECIAL_INODES,
+    SuperBlock, FIRST_EXISTING_INODE, SPECIAL_INODES,
 };
 use crate::util::FromU32;
 
@@ -18,67 +19,78 @@ pub struct BlockGroup<'a> {
 }
 
 impl<'a> BlockGroup<'a> {
-    pub unsafe fn new(fs_ptr: *mut u8, info: Ext4BlockGroupConstructionInfo) -> Self {
-        let start_byte = info.start_block * usize::fromx(info.block_size);
-        let block_group_ptr = fs_ptr.add(start_byte);
-        let (inode_table_ptr, inode_table_len) = Self::init_inode_table(block_group_ptr, info);
+    /// PANICS: TODO
+    pub fn new(mut block_group_metadata: &'a mut [u8], info: Ext4BlockGroupConstructionInfo) -> Self {
+        let remaining_blocks = &mut block_group_metadata;
+        let superblock = Self::init_superblock(remaining_blocks, info);
+        let gdt = Self::init_gdt(remaining_blocks, info);
+        let data_block_bitmap = Self::init_data_block_bitmap(remaining_blocks, info);
+        let inode_bitmap = Self::init_inode_bitmap(remaining_blocks, info);
+        let (inode_table_ptr, inode_table_len) = Self::init_inode_table(remaining_blocks, info);
+        assert!(remaining_blocks.is_empty());
 
         Self {
-            superblock: Self::init_superblock(block_group_ptr, info),
-            gdt: Self::init_gdt(block_group_ptr, info),
-            data_block_bitmap: Self::init_data_block_bitmap(block_group_ptr, info),
-            inode_bitmap: Self::init_inode_bitmap(block_group_ptr, info),
+            superblock,
+            gdt,
+            data_block_bitmap,
+            inode_bitmap,
             inode_table_ptr,
             inode_table_len,
         }
     }
 
-    unsafe fn init_superblock<'b>(
-        block_group_ptr: *mut u8,
+    fn init_superblock<'b>(
+        block_group_metadata: &'b mut &'a mut [u8],
         info: Ext4BlockGroupConstructionInfo,
-    ) -> Option<&'b mut SuperBlock> {
+    ) -> Option<&'a mut SuperBlock> {
         match info.superblock_construction_info {
-            SuperBlockConstructionInfo::YesOriginal { .. } => {
-                let superblock_ptr = if usize::fromx(info.block_size) == FIRST_BLOCK_PADDING {
-                    block_group_ptr as *mut SuperBlock
-                } else {
-                    block_group_ptr.add(FIRST_BLOCK_PADDING) as *mut SuperBlock
+            SuperBlockConstructionInfo::YesOriginal { superblock_start_byte, .. } | SuperBlockConstructionInfo::YesBackup { superblock_start_byte, .. } => {
+                let metadata_blocks = std::mem::take(block_group_metadata);
+                let (block_containing_superblock, remaining_blocks) =
+                    metadata_blocks.split_at_mut(usize::fromx(info.block_size));
+                *block_group_metadata = remaining_blocks;
+                // SAFETY: TODO
+                let (before, superblock, _) = unsafe {
+                    block_containing_superblock[superblock_start_byte..].align_to_mut::<SuperBlock>()
                 };
-                Some(&mut *superblock_ptr)
+                assert!(before.is_empty());
+                Some(&mut superblock[0])
             }
-            SuperBlockConstructionInfo::YesBackup { .. } => Some(&mut *(block_group_ptr as *mut SuperBlock)),
             SuperBlockConstructionInfo::No => None,
         }
     }
 
-    unsafe fn init_gdt<'b>(
-        block_group_ptr: *mut u8,
+    fn init_gdt<'b>(
+        block_group_metadata: &'b mut &'a mut [u8],
         info: Ext4BlockGroupConstructionInfo,
-    ) -> Option<&'b mut [Ext4GroupDescriptor]> {
+    ) -> Option<&'a mut [Ext4GroupDescriptor]> {
         match info.superblock_construction_info {
-            SuperBlockConstructionInfo::YesOriginal {
-                relative_group_descriptor_start_block,
-                group_descriptor_len,
-            }
-            | SuperBlockConstructionInfo::YesBackup {
-                relative_group_descriptor_start_block,
-                group_descriptor_len,
-            } => {
-                let start_byte = relative_group_descriptor_start_block * usize::fromx(info.block_size);
-                let ptr = block_group_ptr.add(start_byte) as *mut Ext4GroupDescriptor;
-                Some(slice::from_raw_parts_mut(ptr, group_descriptor_len))
+            SuperBlockConstructionInfo::YesOriginal { group_descriptor_len, .. }
+            | SuperBlockConstructionInfo::YesBackup { group_descriptor_len, .. } => {
+                let gdt_size = size_of::<Ext4GroupDescriptor>() * group_descriptor_len;
+                let gdt_blocks_size = gdt_size.next_multiple_of(usize::fromx(info.block_size));
+                let metadata_blocks = std::mem::take(block_group_metadata);
+                let (gdt_blocks, remaining_blocks) = metadata_blocks.split_at_mut(gdt_blocks_size);
+                *block_group_metadata = remaining_blocks;
+                // SAFETY: TODO
+                let (before, mut gdt, _) = unsafe {
+                    gdt_blocks.align_to_mut::<Ext4GroupDescriptor>()
+                };
+                gdt = &mut gdt[..group_descriptor_len];
+                assert!(before.is_empty());
+                Some(gdt)
             }
             SuperBlockConstructionInfo::No => None,
         }
     }
 
-    unsafe fn init_data_block_bitmap<'b>(
-        block_group_ptr: *mut u8,
+    fn init_data_block_bitmap<'b>(
+        block_group_metadata: &'b mut &'a mut [u8],
         info: Ext4BlockGroupConstructionInfo,
-    ) -> &'b mut [u8] {
-        let start_byte = info.relative_block_bitmap_block * usize::fromx(info.block_size);
-        let ptr = block_group_ptr.add(start_byte);
-        let data_block_bitmap = slice::from_raw_parts_mut(ptr, usize::fromx(info.block_size));
+    ) -> &'a mut [u8] {
+        let metadata_blocks = std::mem::take(block_group_metadata);
+        let (data_block_bitmap, remaining_blocks) = metadata_blocks.split_at_mut(usize::fromx(info.block_size));
+        *block_group_metadata = remaining_blocks;
         data_block_bitmap.fill(0);
 
         let mut bitmap = Bitmap { data: data_block_bitmap };
@@ -91,8 +103,13 @@ impl<'a> BlockGroup<'a> {
         data_block_bitmap
     }
 
-    unsafe fn init_inode_bitmap<'b>(block_group_ptr: *mut u8, info: Ext4BlockGroupConstructionInfo) -> &'b mut [u8] {
-        let inode_bitmap = Self::blocks_slice(block_group_ptr, info.relative_inode_bitmap_block, info.block_size, 1);
+    fn init_inode_bitmap<'b>(
+        block_group_metadata: &'b mut &'a mut [u8],
+        info: Ext4BlockGroupConstructionInfo,
+    ) -> &'a mut [u8] {
+        let metadata_blocks = std::mem::take(block_group_metadata);
+        let (inode_bitmap, remaining_blocks) = metadata_blocks.split_at_mut(usize::fromx(info.block_size));
+        *block_group_metadata = remaining_blocks;
         inode_bitmap.fill(0);
 
         let mut bitmap = Bitmap { data: inode_bitmap };
@@ -111,27 +128,16 @@ impl<'a> BlockGroup<'a> {
         }
     }
 
-    unsafe fn init_inode_table(block_group_ptr: *mut u8, info: Ext4BlockGroupConstructionInfo) -> (*mut u8, usize) {
-        let table = Self::blocks_slice(
-            block_group_ptr,
-            info.relative_inode_table_start_block,
-            info.block_size,
-            info.inode_table_block_count,
-        );
+    fn init_inode_table<'b>(
+        block_group_metadata: &'b mut &'a mut [u8],
+        info: Ext4BlockGroupConstructionInfo,
+    ) -> (*mut u8, usize) {
+        let metadata_blocks = std::mem::take(block_group_metadata);
+        let (table, remaining_blocks) =
+            metadata_blocks.split_at_mut(usize::fromx(info.block_size) * info.inode_table_block_count);
+        *block_group_metadata = remaining_blocks;
         table.fill(0);
         (table.as_mut_ptr(), table.len())
-    }
-
-    unsafe fn blocks_slice<'b>(
-        block_group_ptr: *mut u8,
-        relative_block_idx: usize,
-        block_size: BlockSize,
-        block_count: BlockCount,
-    ) -> &'b mut [u8] {
-        let start_byte = relative_block_idx * usize::fromx(block_size);
-        let ptr = block_group_ptr.add(start_byte);
-        let len = block_count * usize::fromx(block_size);
-        slice::from_raw_parts_mut(ptr, len)
     }
 
     pub fn mark_relative_range_as_used(&mut self, relative_range: Range<BlockIdx>) {
@@ -167,12 +173,12 @@ impl<'a> BlockGroup<'a> {
 #[derive(Clone, Copy, Debug)]
 pub enum SuperBlockConstructionInfo {
     YesOriginal {
-        relative_group_descriptor_start_block: usize,
         group_descriptor_len: usize,
+        superblock_start_byte: usize,
     },
     YesBackup {
-        relative_group_descriptor_start_block: usize,
         group_descriptor_len: usize,
+        superblock_start_byte: usize,
     },
     No,
 }
@@ -207,12 +213,12 @@ impl Ext4BlockGroupConstructionInfo {
         let superblock_construction_info = match has_superblock {
             HasSuperBlock::No => SuperBlockConstructionInfo::No,
             HasSuperBlock::YesOriginal => SuperBlockConstructionInfo::YesOriginal {
-                relative_group_descriptor_start_block: 1,
                 group_descriptor_len: BlockCount::fromx(superblock.block_group_count()),
+                superblock_start_byte: superblock.start_byte_within_block(),
             },
             HasSuperBlock::YesBackup => SuperBlockConstructionInfo::YesBackup {
-                relative_group_descriptor_start_block: 1,
                 group_descriptor_len: BlockCount::fromx(superblock.block_group_count()),
+                superblock_start_byte: 0,
             },
         };
 

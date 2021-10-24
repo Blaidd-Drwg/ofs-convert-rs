@@ -302,6 +302,16 @@ impl SuperBlock {
         self.block_count_with_padding() - BlockCount::fromx(self.s_first_data_block)
     }
 
+    /// If the entire first block is padding, the superblock begins at the start of the next block; otherwise, it begins
+    /// after `FIRST_BLOCK_PADDING` bytes.
+    pub fn start_byte_within_block(&self) -> usize {
+        if self.s_first_data_block == 1 {
+            0
+        } else {
+            FIRST_BLOCK_PADDING
+        }
+    }
+
     pub fn block_group_count(&self) -> BlockGroupCount {
         let count = self
             .block_count_without_padding()
