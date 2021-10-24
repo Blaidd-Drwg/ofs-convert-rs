@@ -1,6 +1,5 @@
 use std::mem::size_of;
 use std::ops::Range;
-use std::slice;
 
 use crate::bitmap::Bitmap;
 use crate::ext4::{
@@ -12,8 +11,8 @@ use crate::util::FromU32;
 pub struct BlockGroup<'a> {
     pub superblock: Option<&'a mut SuperBlock>,
     pub gdt: Option<&'a mut [Ext4GroupDescriptor]>,
-    pub data_block_bitmap: &'a mut [u8],
-    pub inode_bitmap: &'a mut [u8],
+    pub data_block_bitmap: Bitmap<'a>,
+    pub inode_bitmap: Bitmap<'a>,
     pub inode_table_ptr: *mut u8,
     pub inode_table_len: usize,
 }
@@ -87,39 +86,39 @@ impl<'a> BlockGroup<'a> {
     fn init_data_block_bitmap<'b>(
         block_group_metadata: &'b mut &'a mut [u8],
         info: Ext4BlockGroupConstructionInfo,
-    ) -> &'a mut [u8] {
+    ) -> Bitmap<'a> {
         let metadata_blocks = std::mem::take(block_group_metadata);
-        let (data_block_bitmap, remaining_blocks) = metadata_blocks.split_at_mut(usize::fromx(info.block_size));
+        let (bitmap_bytes, remaining_blocks) = metadata_blocks.split_at_mut(usize::fromx(info.block_size));
         *block_group_metadata = remaining_blocks;
-        data_block_bitmap.fill(0);
 
-        let mut bitmap = Bitmap { data: data_block_bitmap };
+        let mut bitmap = Bitmap { data: bitmap_bytes };
+        bitmap.clear_all();
         for overhead_block_idx in 0..info.overhead {
             bitmap.set(overhead_block_idx);
         }
         for nonexistent_block_idx in info.blocks_count..bitmap.len() {
             bitmap.set(nonexistent_block_idx);
         }
-        data_block_bitmap
+        bitmap
     }
 
     fn init_inode_bitmap<'b>(
         block_group_metadata: &'b mut &'a mut [u8],
         info: Ext4BlockGroupConstructionInfo,
-    ) -> &'a mut [u8] {
+    ) -> Bitmap<'a> {
         let metadata_blocks = std::mem::take(block_group_metadata);
-        let (inode_bitmap, remaining_blocks) = metadata_blocks.split_at_mut(usize::fromx(info.block_size));
+        let (bitmap_bytes, remaining_blocks) = metadata_blocks.split_at_mut(usize::fromx(info.block_size));
         *block_group_metadata = remaining_blocks;
-        inode_bitmap.fill(0);
 
-        let mut bitmap = Bitmap { data: inode_bitmap };
+        let mut bitmap = Bitmap { data: bitmap_bytes };
+        bitmap.clear_all();
         if info.is_first_block_group {
             Self::mark_special_inodes_as_used(&mut bitmap);
         }
         for nonexistent_inode_idx in usize::fromx(info.inodes_count)..bitmap.len() {
             bitmap.set(nonexistent_inode_idx);
         }
-        inode_bitmap
+        bitmap
     }
 
     fn mark_special_inodes_as_used(inode_bitmap: &mut Bitmap) {
@@ -141,22 +140,20 @@ impl<'a> BlockGroup<'a> {
     }
 
     pub fn mark_relative_range_as_used(&mut self, relative_range: Range<BlockIdx>) {
-        let mut bitmap = Bitmap { data: self.data_block_bitmap };
         for block_idx in relative_range {
-            bitmap.set(block_idx);
+            self.data_block_bitmap.set(block_idx);
         }
     }
 
     /// PANICS: Panics if `relative_inode_no` is already allocated or is out of bounds.
     pub fn allocate_relative_inode(&mut self, relative_inode_no: InodeCount, inode_size: u16) -> &'a mut InodeInner {
-        let mut bitmap = Bitmap { data: self.inode_bitmap };
         assert!(
-            !bitmap.get(usize::fromx(relative_inode_no)),
+            !self.inode_bitmap.get(usize::fromx(relative_inode_no)),
             "Tried to allocate already used inode with relative index {}",
             relative_inode_no
         );
 
-        bitmap.set(usize::fromx(relative_inode_no));
+        self.inode_bitmap.set(usize::fromx(relative_inode_no));
         // SAFETY: Safe since the bitmap ensures we don't use the same `relative_inode_no` twice.
         unsafe { self.get_relative_inode(relative_inode_no, inode_size) }
     }

@@ -17,6 +17,10 @@ impl<'a> Bitmap<'a> {
         self.data[data_idx] &= !(1 << bit_idx);
     }
 
+    pub fn clear_all(&mut self) {
+        self.data.fill(0);
+    }
+
     /// PANICS: Panics if `idx` out of bounds
     pub fn get(&self, idx: usize) -> bool {
         let (data_idx, bit_idx) = idx.div_rem(&8);
