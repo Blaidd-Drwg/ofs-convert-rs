@@ -18,18 +18,22 @@ use crate::util::{FromU32, FromUsize};
 pub type Ext4TreeDeserializer<'a> = Deserializer<'a, Ext4TreeDeserializerInternals<'a>>;
 
 impl<'a> Ext4TreeDeserializer<'a> {
-    pub fn new(reader: Reader<'a>, allocator: Allocator<'a>, fat_fs: Ext4Fs<'a>) -> Self {
+    pub fn new(reader: Reader<'a>, allocator: Allocator<'a>, ext_fs: Ext4Fs<'a>) -> Self {
         Self {
-            internals: Ext4TreeDeserializerInternals::new(reader, allocator, fat_fs),
+            internals: Ext4TreeDeserializerInternals::new(reader, allocator, ext_fs),
             _lifetime: PhantomData,
         }
     }
 
-    pub fn new_with_dry_run(reader: Reader<'a>, allocator: Allocator<'a>, fat_fs: FatFs<'a>) -> Result<Self> {
+    /// SAFETY: Safe if no block in `SuperBlock::from(fat_fs.boot_sector).block_group_overhead_ranges()` is accessed for
+    /// the duration of the lifetime 'a
+    pub unsafe fn new_with_dry_run(reader: Reader<'a>, allocator: Allocator<'a>, fat_fs: FatFs<'a>) -> Result<Self> {
         let free_inodes = SuperBlock::from(fat_fs.boot_sector())?.allocatable_inode_count();
         let free_blocks = allocator.free_block_count();
         DryRunDeserializer::dry_run(reader.clone(), free_inodes, free_blocks, fat_fs.cluster_size())?;
-        Ok(Self::new(reader, allocator, fat_fs.into_ext4()?))
+        // SAFETY: Safe because
+        let ext_fs = fat_fs.into_ext4()?;
+        Ok(Self::new(reader, allocator, ext_fs))
     }
 }
 

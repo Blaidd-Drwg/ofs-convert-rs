@@ -107,6 +107,7 @@ unsafe fn ofs_convert(partition_path: &str) -> Result<()> {
 
     let mut serializer = FatTreeSerializer::new(allocator, fat_fs, forbidden_ranges);
     serializer.serialize_directory_tree().context("Serialization failed")?;
+    // SAFETY: Safe because we have added the relevant blocks into the allocator's forbidden ranges
     let mut deserializer = serializer.into_deserializer().context("A dry run of the conversion failed")?;
 
     deserializer

@@ -86,9 +86,12 @@ impl<'a> FatFs<'a> {
         Ok((instance, allocator))
     }
 
-    pub fn into_ext4(self) -> Result<Ext4Fs<'a>> {
+    /// SAFETY: Safe if no block in `SuperBlock::from(self.boot_sector).block_group_overhead_ranges()` is accessed for
+    /// the duration of the lifetime 'a
+    pub unsafe fn into_ext4(self) -> Result<Ext4Fs<'a>> {
         let start_ptr = self.boot_sector as *const _ as *mut u8;
-        unsafe { Ext4Fs::from(start_ptr, self.boot_sector) }
+        // SAFETY: Safe since `start_ptr` is the start of a consistent filesystem described by `boot_sector`.
+        Ext4Fs::from(start_ptr, self.boot_sector)
     }
 
     pub fn boot_sector(&self) -> &BootSector {

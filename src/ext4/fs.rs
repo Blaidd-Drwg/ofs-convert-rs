@@ -24,8 +24,8 @@ pub struct Ext4Fs<'a> {
 
 impl<'a> Ext4Fs<'a> {
     /// SAFETY: Safe if `partition_ptr` is valid for reads for `boot_sector.partition_len()` many bytes, and no memory
-    /// belonging to a block in `superblock.block_group_overhead_ranges()` is dereferenced for the duration of the
-    /// lifetime `'a` by someone other than `self`.
+    /// belonging to a block in `SuperBlock::from(boot_sector).block_group_overhead_ranges()` is dereferenced for the
+    /// duration of the lifetime `'a` by someone other than `self`.
     pub unsafe fn from(partition_ptr: *mut u8, boot_sector: &BootSector) -> Result<Self> {
         let superblock = SuperBlock::from(boot_sector)?;
         let mut block_groups = Vec::new();
@@ -38,6 +38,7 @@ impl<'a> Ext4Fs<'a> {
             let block_group_ptr = partition_ptr.add_usize(info.start_block * usize::fromx(info.block_size));
             let metadata_len = usize::fromx(superblock.block_size())
                 * superblock.block_group_overhead(superblock.block_group_has_superblock(block_group_idx));
+            // SAFETY: safe because the memory is valid and we have exclusive access for the duration of `'a`
             let metadata = std::slice::from_raw_parts_mut(block_group_ptr, metadata_len);
             block_groups.push(BlockGroup::new(metadata, info));
         }

@@ -18,7 +18,7 @@ pub struct BlockGroup<'a> {
 }
 
 impl<'a> BlockGroup<'a> {
-    /// PANICS: TODO
+    /// PANICS: Panics if `block_group_metadata.len() != info.overhead * info.block_size`.
     pub fn new(mut block_group_metadata: &'a mut [u8], info: Ext4BlockGroupConstructionInfo) -> Self {
         let remaining_blocks = &mut block_group_metadata;
         let superblock = Self::init_superblock(remaining_blocks, info);
@@ -169,7 +169,8 @@ impl<'a> BlockGroup<'a> {
         assert!(offset + usize::from(inode_size) <= self.inode_table_len);
         // SAFETY: safe because the inode is within the partition.
         let ptr = self.inode_table_ptr.add_usize(offset) as *mut InodeInner;
-        // SAFETY: safe because we have exclusive access to that inode and because its memory was initialized with zeroes.
+        // SAFETY: safe because we have exclusive access to that inode and because its memory was initialized with
+        // zeroes.
         &mut *ptr
     }
 }

@@ -139,7 +139,9 @@ impl<'a> FatTreeSerializer<'a> {
         Ok(copied_fragments)
     }
 
-    pub fn into_deserializer(self) -> Result<Ext4TreeDeserializer<'a>> {
+    /// SAFETY: Safe if no block in `SuperBlock::from(self.fat_fs.boot_sector).block_group_overhead_ranges()` is
+    /// accessed for the duration of the lifetime 'a
+    pub unsafe fn into_deserializer(self) -> Result<Ext4TreeDeserializer<'a>> {
         std::mem::drop(self.allocator); // drop the Rc, allowing `self.stream_archiver` to unwrap it
         let (reader, allocator) = self.stream_archiver.into_inner().into_reader()?;
         Ext4TreeDeserializer::new_with_dry_run(reader, allocator, self.fat_fs)
