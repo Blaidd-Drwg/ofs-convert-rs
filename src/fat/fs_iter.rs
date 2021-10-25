@@ -15,7 +15,7 @@ where I: Iterator<Item = &'a FatPseudoDentry>
 impl<'a> FatFileIter<'a, FatPseudoDentryIter<'a, FatIdxIter<'a>>> {
     /// SAFETY: safe if `start_fat_idx` belongs to a directory
     pub unsafe fn new(start_fat_idx: FatTableIndex, fat_fs: &'a FatFs<'a>) -> Self {
-        let pseudo_dentry_iter = FatPseudoDentryIter::new(start_fat_idx, fat_fs);
+        let pseudo_dentry_iter = unsafe { FatPseudoDentryIter::new(start_fat_idx, fat_fs) };
         Self::from_pseudo_dentry_iter(pseudo_dentry_iter, fat_fs)
     }
 }
@@ -98,7 +98,7 @@ impl<'a> FatPseudoDentryIter<'a, FatIdxIter<'a>> {
     /// SAFETY: Safe if `start_fat_idx` belongs to a directory
     pub unsafe fn new(start_fat_idx: FatTableIndex, fat_fs: &'a FatFs<'a>) -> Self {
         let fat_idx_iter = FatIdxIter::new(start_fat_idx, fat_fs.fat_table());
-        Self::from_cluster_iter(fat_idx_iter, fat_fs)
+        unsafe { Self::from_cluster_iter(fat_idx_iter, fat_fs) }
     }
 }
 

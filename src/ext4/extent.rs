@@ -117,10 +117,12 @@ impl ExtentIdx {
     unsafe fn level_mut<'a>(&'a mut self, allocator: &'a Allocator<'a>) -> ExtentTreeLevel<'a> {
         // SAFETY: Safe since `self.leaf_lo` came from an `AllocatedClusterIdx`, and since it only survives as long as
         // we have a mutable borrow on `self`, ensuring it cannot be duplicated.
-        let mut allocated_cluster_idx = AllocatedClusterIdx::new(self.leaf_lo);
-        let block = allocator.cluster_mut(&mut allocated_cluster_idx);
-        let (_, entries, _) = block.align_to_mut::<ExtentTreeElement>();
-        ExtentTreeLevel::new(entries)
+        unsafe {
+            let mut allocated_cluster_idx = AllocatedClusterIdx::new(self.leaf_lo);
+            let block = allocator.cluster_mut(&mut allocated_cluster_idx);
+            let (_, entries, _) = block.align_to_mut::<ExtentTreeElement>();
+            ExtentTreeLevel::new(entries)
+        }
     }
 }
 
@@ -253,7 +255,7 @@ impl<'a> ExtentTreeLevel<'a> {
     ///           header.depth - 1`.
     pub unsafe fn new(entries: &'a mut [ExtentTreeElement]) -> Self {
         let (header_slice, used_entries) = entries.split_at_mut(1);
-        let header = &mut header_slice[0].header;
+        let header = unsafe { &mut header_slice[0].header };
         assert!(header.is_valid());
         assert_eq!(usize::from(header.max_entry_count), used_entries.len());
 

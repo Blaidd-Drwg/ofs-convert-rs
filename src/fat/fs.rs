@@ -36,15 +36,18 @@ impl<'a> FatFs<'a> {
     /// PANICS: Panics if inconsistencies are detected in the filesystem
     pub unsafe fn new(partition_ptr: *mut u8, partition_len: usize, _lifetime: PhantomData<&'a ()>) -> Result<Self> {
         assert!(size_of::<BootSector>() <= partition_len);
-        let boot_sector = (&*(partition_ptr as *const BootSector)).validate()?;
+        // SAFETY: safe because a consistent FAT32 fs begins with a boot sector
+        let boot_sector = unsafe { &*(partition_ptr as *const BootSector) }.validate()?;
 
         let fat_table_range = boot_sector.get_fat_table_range();
         assert!(fat_table_range.start > size_of::<BootSector>());
         assert!(fat_table_range.end <= partition_len);
         // SAFETY: Safe because the FAT table is within the partition
-        let fat_table_ptr = partition_ptr.add_usize(fat_table_range.start);
-        let fat_table_bytes = slice::from_raw_parts(fat_table_ptr, fat_table_range.len());
-        let fat_table = fat_table_bytes.exact_align_to::<FatTableIndex>();
+        let fat_table = unsafe {
+            let fat_table_ptr = partition_ptr.add_usize(fat_table_range.start);
+            let fat_table_bytes = slice::from_raw_parts(fat_table_ptr, fat_table_range.len());
+            fat_table_bytes.exact_align_to::<FatTableIndex>()
+        };
 
         let data_range = boot_sector.get_data_range();
         assert!(data_range.start > fat_table_range.end);
@@ -54,7 +57,7 @@ impl<'a> FatFs<'a> {
             boot_sector,
             fat_table,
             // SAFETY: Safe because the data clusters are within the partition
-            data_ptr: partition_ptr.add_usize(data_range.start),
+            data_ptr: unsafe { partition_ptr.add_usize(data_range.start) },
             data_len: data_range.len(),
             _lifetime,
         })
@@ -75,15 +78,17 @@ impl<'a> FatFs<'a> {
         // data clusters that contain data) and unused clusters (i.e. the data clusters that contain no data).
         // `FatFs` will only ever dereference pointers to used clusters. `Allocator` will only ever dereference
         // pointers to unused clusters.
-        let instance = Self::new(partition_ptr, partition_len, lifetime)?;
-        let allocator = Allocator::new(
-            partition_ptr,
-            instance.boot_sector.fs_size(),
-            usize::fromx(instance.cluster_size()),
-            instance.used_ranges(),
-            lifetime,
-        );
-        Ok((instance, allocator))
+        unsafe {
+            let instance = Self::new(partition_ptr, partition_len, lifetime)?;
+            let allocator = Allocator::new(
+                partition_ptr,
+                instance.boot_sector.fs_size(),
+                usize::fromx(instance.cluster_size()),
+                instance.used_ranges(),
+                lifetime,
+            );
+            Ok((instance, allocator))
+        }
     }
 
     /// SAFETY: Safe if no block in `SuperBlock::from(self.boot_sector).block_group_overhead_ranges()` is accessed for
@@ -91,7 +96,7 @@ impl<'a> FatFs<'a> {
     pub unsafe fn into_ext4(self) -> Result<Ext4Fs<'a>> {
         let start_ptr = self.boot_sector as *const _ as *mut u8;
         // SAFETY: Safe since `start_ptr` is the start of a consistent filesystem described by `boot_sector`.
-        Ext4Fs::from(start_ptr, self.boot_sector)
+        unsafe { Ext4Fs::from(start_ptr, self.boot_sector) }
     }
 
     pub fn boot_sector(&self) -> &BootSector {
@@ -139,7 +144,7 @@ impl<'a> FatFs<'a> {
     /// Given the index of a directory's first cluster, iterate over the directory's content.
     /// SAFETY: safe if `first_fat_idx` points to a cluster belonging to a directory
     pub unsafe fn dir_content_iter(&'a self, first_fat_idx: FatTableIndex) -> impl Iterator<Item = FatFile> + 'a {
-        FatFileIter::new(first_fat_idx, self)
+        unsafe { FatFileIter::new(first_fat_idx, self) }
     }
 
     /// Given a file's first FAT index, follow the FAT chain and collect all of the file's FAT indices into a list of

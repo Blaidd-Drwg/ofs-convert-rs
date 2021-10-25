@@ -35,11 +35,11 @@ impl<'a> Ext4Fs<'a> {
             let info = Ext4BlockGroupConstructionInfo::new(&superblock, block_group_idx);
             block_group_descriptors.push(Ext4GroupDescriptor::new(info));
             // SAFETY: safe because the block group is within the partition.
-            let block_group_ptr = partition_ptr.add_usize(info.start_block * usize::fromx(info.block_size));
+            let block_group_ptr = unsafe { partition_ptr.add_usize(info.start_block * usize::fromx(info.block_size)) };
             let metadata_len = usize::fromx(superblock.block_size())
                 * superblock.block_group_overhead(superblock.block_group_has_superblock(block_group_idx));
             // SAFETY: safe because the memory is valid and we have exclusive access for the duration of `'a`
-            let metadata = std::slice::from_raw_parts_mut(block_group_ptr, metadata_len);
+            let metadata = unsafe { std::slice::from_raw_parts_mut(block_group_ptr, metadata_len) };
             block_groups.push(BlockGroup::new(metadata, info));
         }
 

@@ -133,7 +133,7 @@ impl<'a> StreamArchiver<'a> {
         let ptr = self.current_page.as_mut_ptr() as *mut Option<PageIdx>;
         // SAFETY: Safe because we have a mutable borrow on `self.current_page` and `self.current_page.len() >=
         // size_of::<Option<PageIdx>>()`.
-        ptr.write_unaligned(None);
+        unsafe { ptr.write_unaligned(None) };
         self.position_in_current_page = size_of::<Option<PageIdx>>();
     }
 
@@ -153,9 +153,11 @@ impl<'a> StreamArchiver<'a> {
 
         // SAFETY: Safe because the resulting pointer is still within the allocated page, which is valid memory, and
         // because pages are not big enough to overflow `isize`.
-        let ptr = self.current_page.as_ptr().add(self.position_in_current_page);
+        unsafe {
+            let ptr = self.current_page.as_ptr().add(self.position_in_current_page);
+            std::ptr::write_unaligned(ptr as *mut T, object);
+        }
         self.position_in_current_page += size_of::<T>();
-        std::ptr::write_unaligned(ptr as *mut T, object);
         Ok(())
     }
 
@@ -210,7 +212,7 @@ impl<'a> Reader<'a> {
 
     /// SAFETY: Undefined behavior if the object at `self.position_in_current_page` is not a `Header`.
     unsafe fn read_header(&mut self) {
-        self.current_header = self.next_object::<Header>();
+        self.current_header = unsafe { self.next_object::<Header>() };
     }
 
     /// SAFETY: Undefined behavior if the object at `self.position_in_current_page` is not of type `T`.
@@ -222,9 +224,12 @@ impl<'a> Reader<'a> {
 
         // SAFETY: Safe because the resulting pointer is still within the allocated page, which is valid memory, and
         // because pages are not big enough to overflow `isize`.
-        let ptr = self.current_page.as_ptr().add(self.position_in_current_page);
+        let result = unsafe {
+            let ptr = self.current_page.as_ptr().add(self.position_in_current_page);
+            std::ptr::read_unaligned(ptr as *const T)
+        };
         self.position_in_current_page += size_of::<T>();
-        std::ptr::read_unaligned(ptr as *const T)
+        result
     }
 
     fn space_left_in_page(&self) -> usize {

@@ -16,7 +16,7 @@ pub trait ExactAlign {
 
 impl<T> ExactAlign for [T] {
     unsafe fn exact_align_to<Target>(&self) -> &[Target] {
-        let (before, target, after) = self.align_to::<Target>();
+        let (before, target, after) = unsafe { self.align_to::<Target>() };
         assert!(before.is_empty());
         assert!(after.is_empty());
         target
@@ -74,10 +74,12 @@ impl<T> AddUsize<T> for *const T {
         let mut byte_ptr = self as *const u8;
         let mut byte_count = count * size_of::<T>();
         while byte_count > isize::MAX as usize {
-            byte_ptr = byte_ptr.offset(isize::MAX);
+            // SAFETY: Safe because the offset in bytes does not overflow `isize`
+            byte_ptr = unsafe { byte_ptr.offset(isize::MAX) };
             byte_count -= isize::MAX as usize;
         }
-        byte_ptr.add(byte_count) as Self
+        // SAFETY: Safe because the offset in bytes does not overflow `isize`
+        unsafe { byte_ptr.add(byte_count) as Self }
     }
 }
 
@@ -86,9 +88,11 @@ impl<T> AddUsize<T> for *mut T {
         let mut byte_ptr = self as *mut u8;
         let mut byte_count = count * size_of::<T>();
         while byte_count > isize::MAX as usize {
-            byte_ptr = byte_ptr.offset(isize::MAX);
+            // SAFETY: Safe because the offset in bytes does not overflow `isize`
+            byte_ptr = unsafe { byte_ptr.offset(isize::MAX) };
             byte_count -= isize::MAX as usize;
         }
-        byte_ptr.add(byte_count) as Self
+        // SAFETY: Safe because the offset in bytes does not overflow `isize`
+        unsafe { byte_ptr.add(byte_count) as Self }
     }
 }

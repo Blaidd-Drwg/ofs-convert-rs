@@ -59,7 +59,8 @@ impl<'a> FatTreeSerializer<'a> {
     /// SAFETY: safe if `first_fat_idx` points to a cluster belonging to a directory
     unsafe fn serialize_directory_content(&self, first_fat_idx: FatTableIndex) -> Result<()> {
         // SAFETY: safe because `first_fat_index` belongs to a directory
-        for file in self.fat_fs.dir_content_iter(first_fat_idx) {
+        let iter = unsafe { self.fat_fs.dir_content_iter(first_fat_idx) };
+        for file in iter {
             if file.dentry.is_dir() {
                 self.serialize_directory(file)?;
             } else {
@@ -144,7 +145,7 @@ impl<'a> FatTreeSerializer<'a> {
     pub unsafe fn into_deserializer(self) -> Result<Ext4TreeDeserializer<'a>> {
         std::mem::drop(self.allocator); // drop the Rc, allowing `self.stream_archiver` to unwrap it
         let (reader, allocator) = self.stream_archiver.into_inner().into_reader()?;
-        Ext4TreeDeserializer::new_with_dry_run(reader, allocator, self.fat_fs)
+        unsafe { Ext4TreeDeserializer::new_with_dry_run(reader, allocator, self.fat_fs) }
     }
 }
 

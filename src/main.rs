@@ -4,6 +4,7 @@
 #![feature(maybe_uninit_extra)]
 #![feature(maybe_uninit_slice)]
 #![feature(maybe_uninit_write_slice)]
+#![deny(unsafe_op_in_unsafe_fn)]
 
 mod allocator;
 mod bitmap;
@@ -96,7 +97,7 @@ unsafe fn ofs_convert(partition_path: &str) -> Result<()> {
     let mut partition = Partition::open(partition_path)?;
     // SAFETY: Safe because `partition`'s memory is valid and contains a FAT32 filesystem.
     let (fat_fs, mut allocator) =
-        FatFs::new_with_allocator(partition.as_mut_ptr(), partition.len(), partition.lifetime)?;
+        unsafe { FatFs::new_with_allocator(partition.as_mut_ptr(), partition.len(), partition.lifetime)? };
     let boot_sector = fat_fs.boot_sector();
     let superblock = SuperBlock::from(boot_sector)?;
 
@@ -108,7 +109,7 @@ unsafe fn ofs_convert(partition_path: &str) -> Result<()> {
     let mut serializer = FatTreeSerializer::new(allocator, fat_fs, forbidden_ranges);
     serializer.serialize_directory_tree().context("Serialization failed")?;
     // SAFETY: Safe because we have added the relevant blocks into the allocator's forbidden ranges
-    let mut deserializer = serializer.into_deserializer().context("A dry run of the conversion failed")?;
+    let mut deserializer = unsafe { serializer.into_deserializer().context("A dry run of the conversion failed")? };
 
     deserializer
         .deserialize_directory_tree()
