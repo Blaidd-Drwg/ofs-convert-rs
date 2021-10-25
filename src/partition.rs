@@ -11,7 +11,6 @@ use fs2::FileExt;
 use memmap::{MmapMut, MmapOptions};
 use nix::ioctl_read;
 
-// TODO macos support
 pub struct Partition<'a> {
     mmap: MmapMut,
     pub lifetime: PhantomData<&'a ()>,
@@ -87,7 +86,6 @@ impl<'a> Partition<'a> {
     }
 }
 
-// TODO test block device
 #[cfg(test)]
 mod tests {
     use std::io::{self, Write};

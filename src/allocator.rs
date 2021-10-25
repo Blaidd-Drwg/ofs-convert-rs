@@ -12,7 +12,6 @@ use crate::fat::ClusterIdx;
 use crate::ranges::{NotCoveredRange, Ranges};
 use crate::util::{AddUsize, FromU32};
 
-// TODO after/during serialization, mark directory dataclusters as free
 /// An `AllocatedClusterIdx` represents a cluster that was allocated by an `Allocator` and functions as a token to
 /// access that cluster, either through the `Allocator` itself or through the `AllocatedReader` derived from it.
 /// Invariant: no two `AllocatedClusterIdx` may have the same value; otherwise, `Allocator::cluster_mut` might alias.

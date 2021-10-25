@@ -104,7 +104,6 @@ impl<'a> DeserializerInternals<'a> for DryRunDeserializerInternals<'a> {
     }
 }
 
-// TODO test `required_block_count`
 impl<'a> DryRunDeserializerInternals<'a> {
     fn build_directory(
         &mut self,

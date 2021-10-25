@@ -153,7 +153,6 @@ impl<'a, Idx: Ord + Copy> FromIterator<Range<Idx>> for Ranges<Idx> {
     }
 }
 
-// TODO test
 impl<'a, Idx: Ord + Copy> Ranges<Idx>
 where Range<Idx>: ExactSizeIterator
 {

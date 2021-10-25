@@ -35,12 +35,25 @@ use crate::serialization::FatTreeSerializer;
 const_assert!(size_of::<usize>() >= size_of::<u32>());
 const_assert!(size_of::<usize>() <= size_of::<u64>());
 
-// TODO how does Ubuntu FAT driver handle timezones?
-// TODO what can overflow?
-// TODO convention: expect messages
-// TODO allow manually increasing number of inodes
-// TODO sometimes using Result where Option would be more idiomatic
-// TODO add context to Errs
+// TODOs:
+// Testing:
+// - block device
+// - `Ranges::free_element_count`
+// - `required_block_count`
+// Correctness:
+// - how does Ubuntu FAT driver handle timezones?
+// - what can overflow?
+// Features:
+// - allow manually increasing number of inodes
+// - improve inodes_per_group heuristic in `SuperBlock`
+// - after/during serialization, mark directory dataclusters as free in allocator
+// - bitmap: set_range would be more efficient, u128 would be more efficient
+// Documentation:
+// - README
+// - convention for `expect` messages
+// - sometimes using Result where Option would be more idiomatic
+// - add context to Errs
+
 fn main() -> Result<()> {
     let matches =
         App::new("ofs-convert")

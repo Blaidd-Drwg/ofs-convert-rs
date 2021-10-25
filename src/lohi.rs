@@ -54,7 +54,7 @@ where
         (hi << Self::LO_HALF_BIT_COUNT) + lo
     }
 
-    // TODO result?
+    /// PANICS: Panics if `value` does not fit into a `LoHalf` + `HiHalf`.
     pub fn set(&mut self, value: Full) {
         *self.lo = LoHalf::try_from(value & Self::lo_half_mask()).unwrap();
         *self.hi = HiHalf::try_from(value >> Self::LO_HALF_BIT_COUNT).unwrap();
