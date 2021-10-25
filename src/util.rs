@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::mem::size_of;
 
 use anyhow::{bail, Result};
 use num::CheckedAdd;
@@ -8,6 +9,8 @@ use num::CheckedAdd;
 /// while ensuring correct alignment and size.
 pub trait ExactAlign {
     /// SAFETY: See the documentation for `slice::align_to`
+    /// PANICS: Panics if `self` is not aligned to `size_of::<Target>` or `size_of::<T> * self.len()` is not divisible
+    /// by `size_of::<Target>`.
     unsafe fn exact_align_to<Target>(&self) -> &[Target];
 }
 
@@ -55,4 +58,37 @@ pub fn exact_log2(n: u32) -> Result<u8> {
         bail!("n is not a power of 2");
     }
     Ok(log)
+}
+
+pub trait AddUsize<T> {
+    /// Add an offset to a pointer. Contrary to the std's `add` function, `count * size_of::<T>()` may safely overflow
+    /// `isize`.
+    /// SAFETY: Safe as long as `ptr` and the resulting pointer point to the same allocated object (without
+    /// relying on an overflowing pointer wrapping around). Specifically, if `ptr` was derived from the pointer to a
+    /// memory mapped file, this function can safely create a pointer to any byte within that file.
+    unsafe fn add_usize(self, count: usize) -> Self;
+}
+
+impl<T> AddUsize<T> for *const T {
+    unsafe fn add_usize(self, count: usize) -> Self {
+        let mut byte_ptr = self as *const u8;
+        let mut byte_count = count * size_of::<T>();
+        while byte_count > isize::MAX as usize {
+            byte_ptr = byte_ptr.offset(isize::MAX);
+            byte_count -= isize::MAX as usize;
+        }
+        byte_ptr.add(byte_count) as Self
+    }
+}
+
+impl<T> AddUsize<T> for *mut T {
+    unsafe fn add_usize(self, count: usize) -> Self {
+        let mut byte_ptr = self as *mut u8;
+        let mut byte_count = count * size_of::<T>();
+        while byte_count > isize::MAX as usize {
+            byte_ptr = byte_ptr.offset(isize::MAX);
+            byte_count -= isize::MAX as usize;
+        }
+        byte_ptr.add(byte_count) as Self
+    }
 }

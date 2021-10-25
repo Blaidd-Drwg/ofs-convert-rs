@@ -10,7 +10,7 @@ use crate::ext4::{
     SuperBlock, FIRST_EXISTING_INODE, FIRST_NON_RESERVED_INODE, LOST_FOUND_INODE_NO, ROOT_INODE_NO,
 };
 use crate::fat::BootSector;
-use crate::util::FromU32;
+use crate::util::{AddUsize, FromU32};
 
 pub struct Ext4Fs<'a> {
     block_groups: Vec<BlockGroup<'a>>,
@@ -30,11 +30,11 @@ impl<'a> Ext4Fs<'a> {
         for block_group_idx in 0..superblock.block_group_count() {
             let info = Ext4BlockGroupConstructionInfo::new(&superblock, block_group_idx);
             block_group_descriptors.push(Ext4GroupDescriptor::new(info));
-            let block_group_ptr = partition_ptr.add(info.start_block * usize::fromx(info.block_size));
+            // SAFETY: safe because the block group is within the partition.
+            let block_group_ptr = partition_ptr.add_usize(info.start_block * usize::fromx(info.block_size));
             let metadata_len = usize::fromx(superblock.block_size())
                 * superblock.block_group_overhead(superblock.block_group_has_superblock(block_group_idx));
             let metadata = std::slice::from_raw_parts_mut(block_group_ptr, metadata_len);
-            // SAFETY: TODO Safe because `info` describes a consistent block group whose memory is within
             block_groups.push(BlockGroup::new(metadata, info));
         }
 

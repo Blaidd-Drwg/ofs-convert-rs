@@ -13,7 +13,7 @@ use crate::fat::{
     BootSector, Cluster, ClusterIdx, DataClusterIdx, FatFile, FatFileIter, FatIdxIter, FatTableIndex, ROOT_FAT_IDX,
 };
 use crate::ranges::Ranges;
-use crate::util::{ExactAlign, FromU32};
+use crate::util::{AddUsize, ExactAlign, FromU32};
 
 
 /// A FAT32 partition consists of 3 regions: the reserved sectors (which include the boot sector),
@@ -41,7 +41,8 @@ impl<'a> FatFs<'a> {
         let fat_table_range = boot_sector.get_fat_table_range();
         assert!(fat_table_range.start > size_of::<BootSector>());
         assert!(fat_table_range.end <= partition_len);
-        let fat_table_ptr = partition_ptr.add(fat_table_range.start);
+        // SAFETY: Safe because the FAT table is within the partition
+        let fat_table_ptr = partition_ptr.add_usize(fat_table_range.start);
         let fat_table_bytes = slice::from_raw_parts(fat_table_ptr, fat_table_range.len());
         let fat_table = fat_table_bytes.exact_align_to::<FatTableIndex>();
 
@@ -52,7 +53,8 @@ impl<'a> FatFs<'a> {
         Ok(Self {
             boot_sector,
             fat_table,
-            data_ptr: partition_ptr.add(data_range.start),
+            // SAFETY: Safe because the data clusters are within the partition
+            data_ptr: partition_ptr.add_usize(data_range.start),
             data_len: data_range.len(),
             _lifetime,
         })
@@ -123,8 +125,12 @@ impl<'a> FatFs<'a> {
         let cluster_size = usize::fromx(self.cluster_size());
         let start_byte = usize::from(data_cluster_idx) * cluster_size;
         assert!(start_byte + cluster_size <= self.data_len);
-        // SAFETY: safe because the memory is valid and cannot be mutated without borrowing `self` as mut.
-        unsafe { slice::from_raw_parts(self.data_ptr.add(start_byte), cluster_size) }
+        unsafe {
+            // SAFETY: safe because the cluster is within the partition.
+            let ptr = self.data_ptr.add_usize(start_byte);
+            // SAFETY: safe because the memory is valid and cannot be mutated without borrowing `self` as mut.
+            slice::from_raw_parts(ptr, cluster_size)
+        }
     }
 
     /// Given the index of a directory's first cluster, iterate over the directory's content.

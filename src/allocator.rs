@@ -10,7 +10,7 @@ use anyhow::{bail, Result};
 use crate::ext4::BlockIdx;
 use crate::fat::ClusterIdx;
 use crate::ranges::{NotCoveredRange, Ranges};
-use crate::util::FromU32;
+use crate::util::{AddUsize, FromU32};
 
 // TODO after/during serialization, mark directory dataclusters as free
 /// An `AllocatedClusterIdx` represents a cluster that was allocated by an `Allocator` and functions as a token to
@@ -170,7 +170,7 @@ impl<'a> Allocator<'a> {
         // SAFETY: safe since the `fs_len` bytes after `fs_ptr` are valid memory and because of the
         // invariant `cursor_byte <= fs_len`, the `new_fs_len` bytes after `new_fs_ptr` are valid
         // memory as well.
-        let new_fs_ptr = unsafe { self.fs_ptr.add(cursor_byte) };
+        let new_fs_ptr = unsafe { self.fs_ptr.add_usize(cursor_byte) };
         let new_fs_len = self.fs_len - cursor_byte;
 
         let allocator = Self {
@@ -208,7 +208,7 @@ impl<'a> Allocator<'a> {
             .cluster_start_byte(idx)
             .unwrap_or_else(|| panic!("Attempted to access invalid cluster {}", idx));
         // SAFETY: The data is valid and since `idx` is unique and we borrowed it, nobody else can mutate the data.
-        unsafe { slice::from_raw_parts(self.fs_ptr.add(start_byte), self.cluster_size) }
+        unsafe { slice::from_raw_parts(self.fs_ptr.add_usize(start_byte), self.cluster_size) }
     }
 
     /// PANICS: Panics if `idx` out of bounds. This is only possible if `idx` was not allocated by `self`.
@@ -218,7 +218,7 @@ impl<'a> Allocator<'a> {
             .unwrap_or_else(|| panic!("Attempted to access invalid cluster {}", idx));
         // SAFETY: The data is valid and since `idx` is unique and we borrowed it mutably, nobody else can access the
         // data.
-        unsafe { slice::from_raw_parts_mut(self.fs_ptr.add(start_byte), self.cluster_size) }
+        unsafe { slice::from_raw_parts_mut(self.fs_ptr.add_usize(start_byte), self.cluster_size) }
     }
 
     pub fn free_block_count(&self) -> usize {
@@ -273,7 +273,7 @@ impl<'a> AllocatedReader<'a> {
             .cluster_start_byte(idx)
             .unwrap_or_else(|| panic!("Attempted to access invalid cluster {}", idx));
         // SAFETY: The data is valid and since `idx` is unique and we borrowed it, nobody can mutate the data.
-        unsafe { slice::from_raw_parts(self.fs_ptr.add(start_byte), self.cluster_size) }
+        unsafe { slice::from_raw_parts(self.fs_ptr.add_usize(start_byte), self.cluster_size) }
     }
 
     /// Returns the offset from `self.fs_ptr` at which the cluster `idx` starts or None if the cluster is not covered by

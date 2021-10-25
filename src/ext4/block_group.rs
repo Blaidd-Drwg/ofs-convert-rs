@@ -6,7 +6,7 @@ use crate::ext4::{
     BlockCount, BlockGroupIdx, BlockIdx, BlockSize, Ext4GroupDescriptor, HasSuperBlock, InodeCount, InodeInner,
     SuperBlock, FIRST_EXISTING_INODE, SPECIAL_INODES,
 };
-use crate::util::FromU32;
+use crate::util::{AddUsize, FromU32};
 
 pub struct BlockGroup<'a> {
     pub superblock: Option<&'a mut SuperBlock>,
@@ -166,7 +166,8 @@ impl<'a> BlockGroup<'a> {
     unsafe fn get_relative_inode(&mut self, relative_inode_no: InodeCount, inode_size: u16) -> &'a mut InodeInner {
         let offset = usize::fromx(relative_inode_no) * usize::from(inode_size);
         assert!(offset + usize::from(inode_size) <= self.inode_table_len);
-        let ptr = self.inode_table_ptr.add(offset) as *mut InodeInner;
+        // SAFETY: safe because the inode is within the partition.
+        let ptr = self.inode_table_ptr.add_usize(offset) as *mut InodeInner;
         &mut *ptr
     }
 }

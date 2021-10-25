@@ -77,6 +77,7 @@ impl<'a> StreamArchiver<'a> {
     fn finalize(&mut self) -> Result<()> {
         enum End {} // not accessible from outside this function, so a call attempting to read `header` will always panic
         let header = Header { len: 0, type_id: TypeId::of::<End>() };
+        // SAFETY: Safe assuming the archive is consistent so far.
         unsafe { self.add_object(header) }
     }
 
@@ -150,6 +151,8 @@ impl<'a> StreamArchiver<'a> {
             type_name::<T>()
         );
 
+        // SAFETY: Safe because the resulting pointer is still within the allocated page, which is valid memory, and
+        // because pages are not big enough to overflow `isize`.
         let ptr = self.current_page.as_ptr().add(self.position_in_current_page);
         self.position_in_current_page += size_of::<T>();
         std::ptr::write_unaligned(ptr as *mut T, object);
@@ -217,6 +220,8 @@ impl<'a> Reader<'a> {
         }
         assert!(self.space_left_in_page() >= size_of::<T>());
 
+        // SAFETY: Safe because the resulting pointer is still within the allocated page, which is valid memory, and
+        // because pages are not big enough to overflow `isize`.
         let ptr = self.current_page.as_ptr().add(self.position_in_current_page);
         self.position_in_current_page += size_of::<T>();
         std::ptr::read_unaligned(ptr as *const T)
