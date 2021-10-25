@@ -169,6 +169,7 @@ impl<'a> BlockGroup<'a> {
         assert!(offset + usize::from(inode_size) <= self.inode_table_len);
         // SAFETY: safe because the inode is within the partition.
         let ptr = self.inode_table_ptr.add_usize(offset) as *mut InodeInner;
+        // SAFETY: safe because we have exclusive access to that inode and because its memory was initialized with zeroes.
         &mut *ptr
     }
 }
