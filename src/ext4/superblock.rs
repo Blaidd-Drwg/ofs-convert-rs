@@ -364,4 +364,9 @@ impl SuperBlock {
     pub fn set_free_blocks_count(&mut self, count: u64) {
         LoHiMut::new(&mut self.s_free_blocks_count_lo, &mut self.s_free_blocks_count_hi).set(count);
     }
+
+    /// Returns the block group indices of block groups containing a superblock and gdt backup copy
+    pub fn backup_bgs(&self) -> impl Iterator<Item = BlockGroupIdx> + '_ {
+        self.s_backup_bgs.iter().copied().filter(|&bg_idx| bg_idx != 0)
+    }
 }

@@ -1,4 +1,4 @@
-use std::mem::size_of;
+use std::mem::{size_of, MaybeUninit};
 use std::ops::Range;
 
 use crate::bitmap::Bitmap;
@@ -9,8 +9,8 @@ use crate::ext4::{
 use crate::util::{AddUsize, FromU32};
 
 pub struct BlockGroup<'a> {
-    pub superblock: Option<&'a mut SuperBlock>,
-    pub gdt: Option<&'a mut [Ext4GroupDescriptor]>,
+    pub superblock: Option<&'a mut MaybeUninit<SuperBlock>>,
+    pub gdt: Option<&'a mut [MaybeUninit<Ext4GroupDescriptor>]>,
     pub data_block_bitmap: Bitmap<'a>,
     pub inode_bitmap: Bitmap<'a>,
     pub inode_table_ptr: *mut u8,
@@ -41,16 +41,17 @@ impl<'a> BlockGroup<'a> {
     fn init_superblock<'b>(
         block_group_metadata: &'b mut &'a mut [u8],
         info: Ext4BlockGroupConstructionInfo,
-    ) -> Option<&'a mut SuperBlock> {
+    ) -> Option<&'a mut MaybeUninit<SuperBlock>> {
         match info.superblock_construction_info {
             SuperBlockConstructionInfo::Yes { superblock_start_byte, .. } => {
                 let metadata_blocks = std::mem::take(block_group_metadata);
                 let (block_containing_superblock, remaining_blocks) =
                     Self::split_at_block_mut(metadata_blocks, 1, info);
                 *block_group_metadata = remaining_blocks;
-                // SAFETY: TODO
-                let (before, superblock, _) =
-                    unsafe { block_containing_superblock[superblock_start_byte..].align_to_mut::<SuperBlock>() };
+                // SAFETY: Safe because we warn the compiler that it's uninitialized.
+                let (before, superblock, _) = unsafe {
+                    block_containing_superblock[superblock_start_byte..].align_to_mut::<MaybeUninit<SuperBlock>>()
+                };
                 assert!(before.is_empty());
                 Some(&mut superblock[0])
             }
@@ -61,7 +62,7 @@ impl<'a> BlockGroup<'a> {
     fn init_gdt<'b>(
         block_group_metadata: &'b mut &'a mut [u8],
         info: Ext4BlockGroupConstructionInfo,
-    ) -> Option<&'a mut [Ext4GroupDescriptor]> {
+    ) -> Option<&'a mut [MaybeUninit<Ext4GroupDescriptor>]> {
         match info.superblock_construction_info {
             SuperBlockConstructionInfo::Yes { group_descriptor_count, .. } => {
                 let gdt_size = size_of::<Ext4GroupDescriptor>() * group_descriptor_count;
@@ -69,8 +70,8 @@ impl<'a> BlockGroup<'a> {
                 let metadata_blocks = std::mem::take(block_group_metadata);
                 let (gdt_blocks, remaining_blocks) = Self::split_at_block_mut(metadata_blocks, gdt_blocks_count, info);
                 *block_group_metadata = remaining_blocks;
-                // SAFETY: TODO
-                let (before, mut gdt, _) = unsafe { gdt_blocks.align_to_mut::<Ext4GroupDescriptor>() };
+                // SAFETY: Safe because we warn the compiler that it's uninitialized.
+                let (before, mut gdt, _) = unsafe { gdt_blocks.align_to_mut::<MaybeUninit<Ext4GroupDescriptor>>() };
                 gdt = &mut gdt[..group_descriptor_count];
                 assert!(before.is_empty());
                 Some(gdt)

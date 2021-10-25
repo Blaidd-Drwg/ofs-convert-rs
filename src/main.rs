@@ -1,6 +1,9 @@
 #![feature(step_trait)]
 #![feature(iter_advance_by)]
 #![feature(int_roundings)]
+#![feature(maybe_uninit_extra)]
+#![feature(maybe_uninit_slice)]
+#![feature(maybe_uninit_write_slice)]
 
 mod allocator;
 mod bitmap;

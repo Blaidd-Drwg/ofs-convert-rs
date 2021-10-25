@@ -1,4 +1,8 @@
+// See https://github.com/rust-lang/rust-clippy/issues/7846
+#![allow(clippy::needless_option_as_deref)]
+
 use std::convert::TryFrom;
+use std::mem::MaybeUninit;
 use std::ops::Range;
 
 use anyhow::{bail, Result};
@@ -38,40 +42,50 @@ impl<'a> Ext4Fs<'a> {
             block_groups.push(BlockGroup::new(metadata, info));
         }
 
-        *block_groups[0]
+        block_groups[0]
             .superblock
             .as_deref_mut()
-            .expect("First ext4 block group has no superblock") = superblock;
-        block_groups[0]
-            .gdt
-            .as_deref_mut()
-            .expect("First ext4 block group has no GDT")
-            .copy_from_slice(&block_group_descriptors);
+            .expect("First ext4 block group has no superblock")
+            .write(superblock);
+        MaybeUninit::write_slice(
+            block_groups[0].gdt.as_deref_mut().expect("First ext4 block group has no GDT"),
+            &block_group_descriptors,
+        );
         Ok(Self {
             block_groups,
             next_free_inode_no: FIRST_NON_RESERVED_INODE,
         })
     }
 
-    pub fn superblock(&self) -> &SuperBlock {
-        self.block_groups[0]
-            .superblock
-            .as_deref()
-            .expect("First ext4 block group has no superblock")
+    fn superblock(&self) -> &SuperBlock {
+        // SAFETY: safe because we initialized the superblock in `from`
+        unsafe {
+            self.block_groups[0]
+                .superblock
+                .as_deref()
+                .expect("First ext4 block group has no superblock")
+                .assume_init_ref()
+        }
     }
 
-    pub fn superblock_mut(&mut self) -> &mut SuperBlock {
-        self.block_groups[0]
-            .superblock
-            .as_deref_mut()
-            .expect("First ext4 block group has no superblock")
+    fn superblock_mut(&mut self) -> &mut SuperBlock {
+        // SAFETY: safe because we initialized the superblock in `from`
+        unsafe {
+            self.block_groups[0]
+                .superblock
+                .as_deref_mut()
+                .expect("First ext4 block group has no superblock")
+                .assume_init_mut()
+        }
     }
 
-    pub fn group_descriptor_table_mut(&mut self) -> &mut [Ext4GroupDescriptor] {
-        self.block_groups[0]
+    fn group_descriptor_table_mut(&mut self) -> &mut [Ext4GroupDescriptor] {
+        let table = self.block_groups[0]
             .gdt
             .as_deref_mut()
-            .expect("First ext4 block group has no GDT")
+            .expect("First ext4 block group has no GDT");
+        // SAFETY: safe because we initialized the gdt in `from`
+        unsafe { MaybeUninit::slice_assume_init_mut(table) }
     }
 
     /// Assumes that `inode` currently has no extents.
@@ -111,7 +125,7 @@ impl<'a> Ext4Fs<'a> {
             .expect("All blocks belong to the same block group, so their count can't overflow u32");
         self.group_descriptor_table_mut()[usize::fromx(block_group_idx)].decrement_free_blocks_count(range_len);
 
-        let group_start_block = self.superblock_mut().block_group_start_block(block_group_idx);
+        let group_start_block = self.superblock().block_group_start_block(block_group_idx);
         let relative_range = range.start - group_start_block..range.end - group_start_block;
         self.block_groups[usize::fromx(block_group_idx)].mark_relative_range_as_used(relative_range);
     }
@@ -159,11 +173,8 @@ impl<'a> Ext4Fs<'a> {
 
         Inode { inode_no, inner }
     }
-}
 
-impl Drop for Ext4Fs<'_> {
-    fn drop(&mut self) {
-        // Fill in sum fields in superblock with data from group descriptors
+    fn update_superblock(&mut self) {
         self.superblock_mut().s_free_inodes_count = self
             .group_descriptor_table_mut()
             .iter_mut()
@@ -175,21 +186,50 @@ impl Drop for Ext4Fs<'_> {
             .map(|block_group| u64::from(block_group.free_blocks_count()))
             .sum();
         self.superblock_mut().set_free_blocks_count(free_blocks_count);
+    }
 
-        // Make superblock and group descriptor table backup copies
-        let superblock = *self.superblock_mut();
+    fn backup_superblock_and_gdt(&mut self) {
+        let superblock = *self.superblock();
         let gdt = self.group_descriptor_table_mut().to_vec();
-        for backup_group_idx in superblock.s_backup_bgs {
+
+        for backup_group_idx in superblock.backup_bgs() {
             let block_group = &mut self.block_groups[usize::fromx(backup_group_idx)];
-            (*block_group
+
+            block_group
                 .superblock
                 .as_deref_mut()
-                .expect("ext4 backup block group has no superblock")) = superblock;
-            block_group
-                .gdt
-                .as_deref_mut()
-                .expect("ext4 backup block group has no GDT")
-                .copy_from_slice(&gdt);
+                .expect("ext4 backup block group has no superblock")
+                .write(superblock);
+
+            let gdt_backup = block_group.gdt.as_deref_mut().expect("ext4 backup block group has no GDT");
+            MaybeUninit::write_slice(gdt_backup, &gdt);
+        }
+    }
+}
+
+impl Drop for Ext4Fs<'_> {
+    fn drop(&mut self) {
+        self.update_superblock();
+        self.backup_superblock_and_gdt();
+
+        // Manually drop `MaybeUninit`s
+        let mut block_groups_with_superblocks = vec![0];
+        block_groups_with_superblocks.extend(self.superblock().backup_bgs());
+        for block_group_idx in block_groups_with_superblocks {
+            let block_group = &mut self.block_groups[usize::fromx(block_group_idx)];
+            // SAFETY: safe because block group 0 was already initialized and we initialized the backups in
+            // `backup_superblock_and_gdt`.
+            unsafe {
+                block_group
+                    .superblock
+                    .as_deref_mut()
+                    .expect("Backup block group has no superblock")
+                    .assume_init_drop();
+                let gdt = block_group.gdt.as_deref_mut().expect("Backup block group has no gdt");
+                for descriptor in gdt {
+                    descriptor.assume_init_drop();
+                }
+            }
         }
     }
 }
