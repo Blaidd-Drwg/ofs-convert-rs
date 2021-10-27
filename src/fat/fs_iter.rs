@@ -59,7 +59,9 @@ where I: Iterator<Item = &'a FatPseudoDentry>
     }
 
     fn count(self) -> usize {
-        self.pseudo_dentry_iter.filter(|pseudo_dentry| pseudo_dentry.is_dentry()).count()
+        self.pseudo_dentry_iter
+            .filter(|pseudo_dentry| pseudo_dentry.is_dentry())
+            .count()
     }
 }
 

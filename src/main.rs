@@ -41,7 +41,6 @@ const_assert!(size_of::<usize>() <= size_of::<u64>());
 // - `Ranges::free_element_count`
 // - `required_block_count`
 // Correctness:
-// - how does Ubuntu FAT driver handle timezones?
 // - what can overflow?
 // Features:
 // - allow manually increasing number of inodes

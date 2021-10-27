@@ -179,6 +179,10 @@ impl LongFileName {
     }
 }
 
+/// Converts a date (with optional time) in the FAT format to a Unix timestamp. We assume that `time` uses UTC. This is
+/// actually often not the case (Windows uses local time; Linux can use either local time or UTC, depending on mount
+/// options whose defaults vary among distributions). However, this is the easier and more conservative option, rather
+/// than trying to determine the original time zone with or without daylight saving time.
 fn fat_time_to_unix(date: u16, time: Option<u16>) -> Result<u32> {
     let year = ((date & 0xFE00) >> 9) + 1980;
     let month = (date & 0x1E0) >> 5;
