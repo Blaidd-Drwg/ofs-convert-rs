@@ -57,6 +57,10 @@ where I: Iterator<Item = &'a FatPseudoDentry>
         };
         Some(file)
     }
+
+    fn count(self) -> usize {
+        self.pseudo_dentry_iter.filter(|pseudo_dentry| pseudo_dentry.is_dentry()).count()
+    }
 }
 
 impl<'a, I> FatFileIter<'a, I>
