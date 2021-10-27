@@ -39,9 +39,10 @@ impl FatTableIndex {
 
     pub fn to_cluster_idx(self, boot_sector: &BootSector) -> ClusterIdx {
         let data_start_byte_idx = boot_sector.get_data_range().start;
-        let data_start_cluster_idx = data_start_byte_idx
-            / (usize::from(boot_sector.bytes_per_sector) * usize::from(boot_sector.sectors_per_cluster));
-        u32::from(self.to_data_cluster_idx()) + u32::try_from(data_start_cluster_idx).unwrap()
+        let data_start_cluster_idx =
+            ClusterIdx::try_from(data_start_byte_idx / usize::fromx(boot_sector.cluster_size()))
+                .expect("ClusterIdx must fit into u32");
+        u32::from(self.to_data_cluster_idx()) + data_start_cluster_idx
     }
 
     /// True if `self.0` is a special value representing the end of a FAT chain.

@@ -1,4 +1,3 @@
-use std::convert::TryFrom;
 use std::ops::Range;
 
 use anyhow::{bail, Result};
@@ -66,7 +65,7 @@ impl BootSector {
     /// Returns the range in bytes of the first FAT table, relative to the filesystem start
     pub fn get_fat_table_range(&self) -> Range<usize> {
         let fat_table_start_byte = usize::from(self.sectors_before_fat) * usize::from(self.bytes_per_sector);
-        let fat_table_len = usize::try_from(self.sectors_per_fat).unwrap() * usize::from(self.bytes_per_sector);
+        let fat_table_len = usize::fromx(self.sectors_per_fat) * usize::from(self.bytes_per_sector);
         fat_table_start_byte..fat_table_start_byte + fat_table_len
     }
 

@@ -1,10 +1,16 @@
 use num::Integer;
 
 pub struct Bitmap<'a> {
-    pub data: &'a mut [u8],
+    data: &'a mut [u8],
 }
 
 impl<'a> Bitmap<'a> {
+    /// PANICS: Panics is `self.len()` would overflow usize
+    pub fn new(data: &'a mut [u8]) -> Self {
+        assert!(data.len().checked_mul(8).is_some());
+        Self { data }
+    }
+
     /// PANICS: Panics if `idx` out of bounds
     pub fn get(&self, idx: usize) -> bool {
         let (data_idx, bit_idx) = idx.div_rem(&8);

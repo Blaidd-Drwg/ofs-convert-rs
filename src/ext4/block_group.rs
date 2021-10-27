@@ -88,7 +88,7 @@ impl<'a> BlockGroup<'a> {
         let (bitmap_bytes, remaining_blocks) = Self::split_at_block_mut(metadata_blocks, 1, info);
         *block_group_metadata = remaining_blocks;
 
-        let mut bitmap = Bitmap { data: bitmap_bytes };
+        let mut bitmap = Bitmap::new(bitmap_bytes);
         bitmap.clear_all();
         for overhead_block_idx in 0..info.overhead {
             bitmap.set(overhead_block_idx);
@@ -107,7 +107,7 @@ impl<'a> BlockGroup<'a> {
         let (bitmap_bytes, remaining_blocks) = Self::split_at_block_mut(metadata_blocks, 1, info);
         *block_group_metadata = remaining_blocks;
 
-        let mut bitmap = Bitmap { data: bitmap_bytes };
+        let mut bitmap = Bitmap::new(bitmap_bytes);
         bitmap.clear_all();
         if info.is_first_block_group {
             Self::mark_special_inodes_as_used(&mut bitmap);

@@ -227,10 +227,13 @@ impl<'a> Allocator<'a> {
     /// Returns the offset from `self.fs_ptr` at which the cluster `idx` starts or None if the cluster is not covered by
     /// `self`, i.e. if the offset is not in `0..=self.fs_len - self.cluster_size`.
     fn cluster_start_byte(&self, idx: &AllocatedClusterIdx) -> Option<usize> {
-        idx.0
-            .checked_sub(self.first_valid_index)
-            .map(|relative_cluster_idx| self.cluster_size * usize::fromx(relative_cluster_idx))
-            .filter(|start_byte| start_byte + self.cluster_size <= self.fs_len)
+        let relative_cluster_idx = idx.0.checked_sub(self.first_valid_index)?;
+        let start_byte = self.cluster_size.checked_mul(usize::fromx(relative_cluster_idx))?;
+        if start_byte + self.cluster_size <= self.fs_len {
+            Some(start_byte)
+        } else {
+            None
+        }
     }
 
     /// Returns the next range at or after `self.cursor` that is not used, or Err if such a range does not exist.
@@ -278,7 +281,7 @@ impl<'a> AllocatedReader<'a> {
     /// Returns the offset from `self.fs_ptr` at which the cluster `idx` starts or None if the cluster is not covered by
     /// `self`, i.e. if the offset is not in `0..=self.fs_len - self.cluster_size`.
     fn cluster_start_byte(&self, idx: &AllocatedClusterIdx) -> Option<usize> {
-        let start_byte = usize::fromx(idx.0) * self.cluster_size;
+        let start_byte = usize::fromx(idx.0).checked_mul(self.cluster_size)?;
         if start_byte + self.cluster_size <= self.fs_len {
             Some(start_byte)
         } else {
