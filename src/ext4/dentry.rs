@@ -52,10 +52,11 @@ impl Ext4Dentry {
 }
 
 impl Ext4DentrySized {
-    /// PANICS: Panics if `dentry
+    /// PANICS: Panics if incrementing the dentry length by `num` would break alignment or cause `self.dentry_len` to
+    /// overflow.
     pub fn increment_dentry_len(&mut self, num: u16) {
         assert!(usize::from(num) % ALIGNMENT == 0);
-        self.dentry_len += num;
+        self.dentry_len = self.dentry_len.checked_add(num).unwrap();
     }
 }
 

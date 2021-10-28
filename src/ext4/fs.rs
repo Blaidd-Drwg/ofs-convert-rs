@@ -19,7 +19,7 @@ use crate::util::{AddUsize, FromU32};
 pub struct Ext4Fs<'a> {
     block_groups: Vec<BlockGroup<'a>>,
     /// Used for allocating inodes
-    next_free_inode_no: InodeNo,
+    last_allocated_inode_no: InodeNo,
 }
 
 impl<'a> Ext4Fs<'a> {
@@ -54,7 +54,7 @@ impl<'a> Ext4Fs<'a> {
         );
         Ok(Self {
             block_groups,
-            next_free_inode_no: FIRST_NON_RESERVED_INODE,
+            last_allocated_inode_no: FIRST_NON_RESERVED_INODE - 1,
         })
     }
 
@@ -117,14 +117,13 @@ impl<'a> Ext4Fs<'a> {
 
     /// PANICS: Panics if `range` contains blocks belonging to more than one block group
     pub fn mark_range_as_used(&mut self, inode: &mut Inode, range: Range<BlockIdx>) {
-        inode.increment_used_blocks(range.len(), self.superblock().block_size());
-
         let block_group_idx = self.block_group_idx_of_block(range.start);
         assert_eq!(block_group_idx, self.block_group_idx_of_block(range.end - 1));
 
         let range_len = u32::try_from(range.len())
             .expect("All blocks belong to the same block group, so their count can't overflow u32");
         self.group_descriptor_table_mut()[usize::fromx(block_group_idx)].decrement_free_blocks_count(range_len);
+        inode.increment_used_blocks(range.len(), self.superblock().block_size());
 
         let group_start_block = self.superblock().block_group_start_block(block_group_idx);
         let relative_range = range.start - group_start_block..range.end - group_start_block;
@@ -149,11 +148,12 @@ impl<'a> Ext4Fs<'a> {
     /// Inode 11 is not officially reserved for the lost+found directory, but fsck complains if it's not there.
     /// Therefore, the inode returned by the first call to `allocate_inode` should be used for lost+found.
     pub fn allocate_inode(&mut self, is_dir: bool) -> Result<Inode<'a>> {
-        let inode_no = self.next_free_inode_no;
-        self.next_free_inode_no += 1;
-        if inode_no > self.superblock().max_inode_no() {
+        let inode_no = self.last_allocated_inode_no.checked_add(1);
+        if inode_no.is_none() || inode_no.unwrap() > self.superblock().max_inode_no() {
             bail!("No free inodes left");
         }
+        let inode_no = inode_no.unwrap();
+        self.last_allocated_inode_no = inode_no;
         Ok(self.allocate_inode_with_no(inode_no, is_dir))
     }
 

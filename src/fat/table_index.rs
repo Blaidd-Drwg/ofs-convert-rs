@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 use std::iter::Step;
-use std::ops::{Add, AddAssign, Index};
+use std::ops::Index;
 
 use crate::fat::{BootSector, ClusterIdx};
 use crate::util::FromU32;
@@ -13,18 +13,6 @@ pub const ROOT_FAT_IDX: FatTableIndex = FatTableIndex(2);
 #[derive(PartialEq, Eq, Copy, Clone, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct FatTableIndex(u32);
-impl Add<u32> for FatTableIndex {
-    type Output = Self;
-    fn add(self, other: u32) -> Self {
-        Self(self.0 + other)
-    }
-}
-
-impl AddAssign<u32> for FatTableIndex {
-    fn add_assign(&mut self, other: u32) {
-        self.0 += other;
-    }
-}
 
 impl FatTableIndex {
     pub const fn new(idx: u32) -> Self {
@@ -42,7 +30,7 @@ impl FatTableIndex {
         let data_start_cluster_idx =
             ClusterIdx::try_from(data_start_byte_idx / usize::fromx(boot_sector.cluster_size()))
                 .expect("ClusterIdx must fit into u32");
-        u32::from(self.to_data_cluster_idx()) + data_start_cluster_idx
+        data_start_cluster_idx + u32::from(self.to_data_cluster_idx())
     }
 
     /// True if `self.0` is a special value representing the end of a FAT chain.

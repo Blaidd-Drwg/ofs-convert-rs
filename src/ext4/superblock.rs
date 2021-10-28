@@ -25,7 +25,8 @@ const FEATURE_COMPAT_SPARSE_SUPER2: u32 = 0x200; // use only two superblock back
 const FEATURE_INCOMPAT_EXTENTS: u32 = 0x40; // use extents to represent a file's data blocks
 const FEATURE_INCOMPAT_64BIT: u32 = 0x80; // allow filesystems bigger with more than 2^32 blocks
 const FEATURE_INCOMPAT_LARGEDIR: u32 = 0x4000; // allow directories bigger than 2GB
-const FEATURE_RO_COMPAT_LARGE_FILES: u32 = 0x2; // allow files bigger than 2GiB
+const FEATURE_RO_COMPAT_LARGE_FILE: u32 = 0x2; // allow files bigger than 2GiB
+const FEATURE_RO_COMPAT_HUGE_FILE: u32 = 0x8; // allow files bigger than 2TiB, for the hell of it
 const FEATURE_RO_COMPAT_DIR_NLINK: u32 = 0x20; // allow directories with more than 65000 subdirectories
 const INODE_RATIO: u32 = 16384;
 const INODE_SIZE: u16 = 256;
@@ -47,17 +48,22 @@ pub enum HasSuperBlock {
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct SuperBlock {
+    /// max value: u32::MAX
     pub s_inodes_count: u32,
     pub s_blocks_count_lo: u32,
     pub s_r_blocks_count_lo: u32,
     pub s_free_blocks_count_lo: u32,
     pub s_free_inodes_count: u32,
+    /// 0 or 1
     pub s_first_data_block: u32,
-    pub s_log_block_size: u32, // max value: 6
+    /// max value: 6
+    pub s_log_block_size: u32,
     pub s_log_cluster_size: u32,
-    pub s_blocks_per_group: u32, // max value: 65528
+    /// max value: 65528
+    pub s_blocks_per_group: u32,
     pub s_clusters_per_group: u32,
-    pub s_inodes_per_group: u32, // max value: 524288
+    /// max value: 524288 (using current heuristic, 262112)
+    pub s_inodes_per_group: u32,
     pub s_mtime: u32,
     pub s_wtime: u32,
     pub s_mnt_count: u16,
@@ -244,7 +250,8 @@ impl SuperBlock {
         self.s_state = STATE_CLEANLY_UNMOUNTED;
         self.s_feature_compat = FEATURE_COMPAT_SPARSE_SUPER2;
         self.s_feature_incompat = FEATURE_INCOMPAT_64BIT | FEATURE_INCOMPAT_EXTENTS | FEATURE_INCOMPAT_LARGEDIR;
-        self.s_feature_ro_compat = FEATURE_RO_COMPAT_LARGE_FILES | FEATURE_RO_COMPAT_DIR_NLINK;
+        self.s_feature_ro_compat =
+            FEATURE_RO_COMPAT_LARGE_FILE | FEATURE_RO_COMPAT_HUGE_FILE | FEATURE_RO_COMPAT_DIR_NLINK;
         self.s_desc_size = DESC_SIZE_64BIT;
         self.s_inode_size = INODE_SIZE;
         self.s_rev_level = NEWEST_REVISION;
@@ -254,7 +261,7 @@ impl SuperBlock {
     }
 
     pub fn max_inode_no(&self) -> InodeNo {
-        self.s_inodes_count + FIRST_EXISTING_INODE - 1
+        self.s_inodes_count - 1 + FIRST_EXISTING_INODE
     }
 
     pub fn allocatable_inode_count(&self) -> InodeCount {
@@ -330,13 +337,13 @@ impl SuperBlock {
         }
     }
 
-    pub fn first_data_block(&self) -> BlockIdx {
+    pub fn first_usable_block(&self) -> BlockIdx {
         BlockIdx::fromx(self.s_first_data_block)
     }
 
     // if the block size is FIRST_BLOCK_PADDING, every block group begins one block later than normal
     pub fn block_group_start_block(&self, block_group_idx: BlockGroupIdx) -> BlockIdx {
-        usize::fromx(self.s_blocks_per_group) * usize::fromx(block_group_idx) + self.first_data_block()
+        usize::fromx(self.s_blocks_per_group) * usize::fromx(block_group_idx) + self.first_usable_block()
     }
 
     /// Returns the block ranges that contain filesystem metadata, i.e. the ones occupied by the fields of `BlockGroup`.
