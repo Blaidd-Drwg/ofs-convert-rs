@@ -40,8 +40,6 @@ const_assert!(size_of::<usize>() <= size_of::<u64>());
 // - block device
 // - `Ranges::free_element_count`
 // - `required_block_count`
-// Correctness:
-// - what can overflow?
 // Features:
 // - allow manually increasing number of inodes
 // - improve inodes_per_group heuristic in `SuperBlock`

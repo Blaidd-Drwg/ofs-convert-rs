@@ -199,7 +199,7 @@ impl SuperBlock {
         sb.s_inodes_per_group = inode_bitmap_size.min(heuristic_inodes_per_group);
 
         let mut block_count = fs_len / BlockCount::fromx(block_size);
-        let mut data_block_count = block_count - BlockCount::fromx(sb.s_first_data_block);
+        let mut data_block_count = block_count.saturating_sub(BlockCount::fromx(sb.s_first_data_block));
         // set the intermediate value in `sb` because it is needed by the call to `sb.block_group_overhead`.
         LoHiMut::new(&mut sb.s_blocks_count_lo, &mut sb.s_blocks_count_hi).set(u64::fromx(block_count));
         let last_group_block_count = data_block_count % BlockCount::fromx(sb.s_blocks_per_group);

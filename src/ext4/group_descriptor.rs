@@ -1,5 +1,3 @@
-use std::convert::TryFrom;
-
 use crate::ext4::{Ext4BlockGroupConstructionInfo, InodeCount, SPECIAL_INODES};
 use crate::lohi::{LoHi, LoHiMut};
 use crate::util::FromUsize;
@@ -38,7 +36,7 @@ impl Ext4GroupDescriptor {
         let inode_bitmap_block = u64::fromx(info.inode_bitmap_block);
         let inode_table_start_block = u64::fromx(info.inode_table_start_block);
         let special_inode_count = if info.is_first_block_group {
-            u32::try_from(SPECIAL_INODES.len()).unwrap()
+            SPECIAL_INODES.len() as u32
         } else {
             0
         };

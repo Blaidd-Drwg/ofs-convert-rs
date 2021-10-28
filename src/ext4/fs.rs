@@ -108,20 +108,30 @@ impl<'a> Ext4Fs<'a> {
         Ok(())
     }
 
-    pub fn block_group_idx_of_block(&self, block_idx: BlockIdx) -> BlockGroupIdx {
+    /// Returns None if the block belong to no block group. That is the case if `block_idx` is the padding block at the
+    /// start of the filesystem, or if it is beyond the end of the last block group.
+    pub fn block_group_idx_of_block(&self, block_idx: BlockIdx) -> Option<BlockGroupIdx> {
         // any block before `s_first_data_block` doesn't belong to any block group
-        let data_block_idx = block_idx - BlockIdx::fromx(self.superblock().s_first_data_block);
+        let data_block_idx = block_idx.checked_sub(self.superblock().first_usable_block())?;
         let bg_idx = data_block_idx / usize::fromx(self.superblock().s_blocks_per_group);
-        BlockGroupIdx::try_from(bg_idx).expect("Attempted to compute a block group index that does not fit in a u32")
+        BlockGroupIdx::try_from(bg_idx).ok()
     }
 
     /// PANICS: Panics if `range` contains blocks belonging to more than one block group
     pub fn mark_range_as_used(&mut self, inode: &mut Inode, range: Range<BlockIdx>) {
-        let block_group_idx = self.block_group_idx_of_block(range.start);
-        assert_eq!(block_group_idx, self.block_group_idx_of_block(range.end - 1));
+        let block_group_idx = self
+            .block_group_idx_of_block(range.start)
+            .expect("Attempted to mark an unusable block as used");
+        let end_block_group_idx = self
+            .block_group_idx_of_block(range.end - 1)
+            .expect("Attempted to mark an unusable block as used");
+        assert_eq!(
+            block_group_idx, end_block_group_idx,
+            "Attempted to mark a range of blocks from different block groups as used"
+        );
 
         let range_len = u32::try_from(range.len())
-            .expect("All blocks belong to the same block group, so their count can't overflow u32");
+            .expect("All blocks belong to the same block group, which has at most u32::MAX blocks");
         self.group_descriptor_table_mut()[usize::fromx(block_group_idx)].decrement_free_blocks_count(range_len);
         inode.increment_used_blocks(range.len(), self.superblock().block_size());
 

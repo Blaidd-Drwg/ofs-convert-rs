@@ -145,6 +145,7 @@ impl DirectoryWriter for DryRunDirectoryWriter {}
 
 impl DryRunDirectoryWriter {
     fn new(block_size: BlockSize) -> Self {
+        debug_assert!(usize::fromx(block_size) >= Ext4Dentry::MAX_LEN);
         Self {
             used_dentry_blocks: 0,
             used_extent_blocks: 0,

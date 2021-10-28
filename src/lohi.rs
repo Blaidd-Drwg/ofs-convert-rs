@@ -2,7 +2,7 @@ use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::mem::size_of;
-use std::ops::{Add, AddAssign, Sub, SubAssign};
+use std::ops::{AddAssign, SubAssign};
 
 use num::PrimInt;
 
@@ -69,6 +69,7 @@ where
     LoHalf::Error: Debug,
     HiHalf::Error: Debug,
 {
+    /// PANICS: Panics on overflow
     fn add_assign(&mut self, other: Full) {
         self.set(self.get() + other);
     }
@@ -82,6 +83,7 @@ where
     LoHalf::Error: Debug,
     HiHalf::Error: Debug,
 {
+    /// PANICS: Panics on underflow
     fn sub_assign(&mut self, other: Full) {
         self.set(self.get() - other);
     }
@@ -121,29 +123,5 @@ where
         let hi: Full = (*self.hi).into();
         let lo: Full = (*self.lo).into();
         (hi << Self::LO_HALF_BIT_COUNT) + lo
-    }
-}
-
-impl<'a, Full, LoHalf, HiHalf> Add<Full> for LoHi<'a, Full, LoHalf, HiHalf>
-where
-    Full: PrimInt + From<LoHalf> + From<HiHalf>,
-    LoHalf: PrimInt + TryFrom<Full>,
-    HiHalf: PrimInt + TryFrom<Full>,
-{
-    type Output = Full;
-    fn add(self, other: Full) -> Self::Output {
-        self.get() + other
-    }
-}
-
-impl<'a, Full, LoHalf, HiHalf> Sub<Full> for LoHi<'a, Full, LoHalf, HiHalf>
-where
-    Full: PrimInt + From<LoHalf> + From<HiHalf>,
-    LoHalf: PrimInt + TryFrom<Full>,
-    HiHalf: PrimInt + TryFrom<Full>,
-{
-    type Output = Full;
-    fn sub(self, other: Full) -> Self::Output {
-        self.get() - other
     }
 }

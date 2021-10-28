@@ -211,8 +211,6 @@ impl<'a> DentryWriter<'a> {
         self.link_count_from_subdirs += 1;
     }
 
-    /// Returns None if the result would overflow u16. That is only possible if `self.block_size == 2^16` and
-    /// `self.position_in_block == 0`.
     fn remaining_space(&self) -> usize {
         self.block_size - self.position_in_block
     }

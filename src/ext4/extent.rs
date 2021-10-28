@@ -128,6 +128,7 @@ impl ExtentIdx {
 
 impl ExtentHeader {
     pub fn new(all_entry_count: u16) -> Self {
+        assert!(all_entry_count > 1);
         Self {
             magic: EXTENT_MAGIC,
             valid_entry_count: 0,
@@ -145,6 +146,7 @@ impl ExtentHeader {
     }
 
     pub fn from_parent(parent: Self, all_entry_count: u16) -> Self {
+        assert!(parent.depth > 0);
         Self {
             depth: parent.depth - 1,
             ..Self::new(all_entry_count)
