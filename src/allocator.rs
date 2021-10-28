@@ -65,8 +65,8 @@ impl Display for AllocatedClusterIdx {
 pub struct AllocatedRange(Range<AllocatedClusterIdx>);
 
 impl AllocatedRange {
-    pub fn len(&self) -> usize {
-        usize::fromx(self.0.end.0 - self.0.start.0)
+    pub fn len(&self) -> u32 {
+        self.0.end.0 - self.0.start.0
     }
 
     pub fn iter_mut(&mut self) -> AllocatedIterMut {
@@ -112,13 +112,11 @@ impl Iterator for AllocatedIterMut<'_> {
 #[derive(Debug)]
 pub struct Allocator<'a> {
     fs_ptr: *mut u8,
-    fs_len: usize,
+    /// clusters outside this range can neither be allocated nor accessed over the methods `cluster` and `cluster_mut`
+    valid_cluster_indices: Range<ClusterIdx>,
     /// the cluster that the Allocator will try to allocate next.
-    /// Invariant: first_valid_index <= cursor <= fs_len * cluster_size
+    /// Invariant: `valid_cluster_indices.contains(cursor.get())`
     cursor: Cell<ClusterIdx>,
-    /// clusters before this index are marked as used and cannot be accessed over the methods `cluster` and
-    /// `cluster_mut`
-    first_valid_index: ClusterIdx,
     /// clusters that will not be allocated
     used_ranges: Ranges<ClusterIdx>,
     cluster_size: usize,
@@ -135,11 +133,12 @@ impl<'a> Allocator<'a> {
         used_ranges: Ranges<ClusterIdx>,
         _lifetime: PhantomData<&'a ()>,
     ) -> Self {
+        let valid_cluster_count =
+            u32::try_from(fs_len / cluster_size).expect("FAT32 cannot have more than 2^32 clusters");
         Self {
             fs_ptr,
-            fs_len,
             cursor: Cell::new(0),
-            first_valid_index: 0,
+            valid_cluster_indices: 0..valid_cluster_count,
             used_ranges,
             cluster_size,
             _lifetime,
@@ -154,47 +153,16 @@ impl<'a> Allocator<'a> {
         self.cluster_size
     }
 
-    /// Splits the `Allocator` into an `AllocatedReader` and an `Allocator`: the `AllocatedReader` can
-    /// only read clusters that were allocated by `self`, the `Allocator` can only write and read
-    /// clusters that could have been allocated by `self` but were not yet allocated.
-    pub fn split_into_reader(self) -> (AllocatedReader<'a>, Self) {
-        let cursor_byte = usize::fromx(self.cursor.get()) * self.cluster_size;
-        let reader = AllocatedReader {
-            fs_ptr: self.fs_ptr,
-            fs_len: cursor_byte,
-            cluster_size: self.cluster_size,
-            _lifetime: self._lifetime,
-        };
-
-        // SAFETY: safe since the `fs_len` bytes after `fs_ptr` are valid memory and because of the
-        // invariant `cursor_byte <= fs_len`, the `new_fs_len` bytes after `new_fs_ptr` are valid
-        // memory as well.
-        let new_fs_ptr = unsafe { self.fs_ptr.add_usize(cursor_byte) };
-        let new_fs_len = self.fs_len - cursor_byte;
-
-        let allocator = Self {
-            fs_ptr: new_fs_ptr,
-            fs_len: new_fs_len,
-            first_valid_index: self.cursor.get(),
-            cursor: self.cursor,
-            used_ranges: self.used_ranges,
-            cluster_size: self.cluster_size,
-            _lifetime: self._lifetime,
-        };
-
-        (reader, allocator)
-    }
-
     /// Returns a cluster that may be exclusively used by the caller.
     pub fn allocate_one(&self) -> Result<AllocatedClusterIdx> {
         Ok(Range::from(self.allocate(1)?).start)
     }
 
-    /// Returns a cluster range that may be exclusively used by the caller with 1 <= `range.len()` <= `max_length`.
-    pub fn allocate(&self, max_length: usize) -> Result<AllocatedRange> {
+    /// Returns a cluster range that may be exclusively used by the caller, with 1 <= `range.len()` <= `max_length`.
+    pub fn allocate(&self, max_length: u32) -> Result<AllocatedRange> {
         let free_range = self.find_next_free_range(self.cursor.get())?;
-        let range_len = u32::try_from(max_length.min(free_range.len())).expect("free_range.len() must fit into a u32");
-        let range_end = free_range.end.min(free_range.start + range_len);
+        let desired_end = free_range.start.saturating_add(max_length);
+        let range_end = free_range.end.min(desired_end);
         self.cursor.set(range_end);
         Ok(AllocatedRange(
             AllocatedClusterIdx(free_range.start)..AllocatedClusterIdx(range_end),
@@ -221,16 +189,16 @@ impl<'a> Allocator<'a> {
     }
 
     pub fn free_block_count(&self) -> usize {
-        self.used_ranges.free_element_count(self.cursor.get(), self.max_cluster_idx())
+        self.used_ranges
+            .free_element_count(self.cursor.get(), self.fs_end_cluster_idx())
     }
 
     /// Returns the offset from `self.fs_ptr` at which the cluster `idx` starts or None if the cluster is not covered by
-    /// `self`, i.e. if the offset is not in `0..=self.fs_len - self.cluster_size`.
+    /// `self`, i.e. if `idx` is not in `self.valid_cluster_indices`.
     fn cluster_start_byte(&self, idx: &AllocatedClusterIdx) -> Option<usize> {
-        let relative_cluster_idx = idx.0.checked_sub(self.first_valid_index)?;
-        let start_byte = self.cluster_size.checked_mul(usize::fromx(relative_cluster_idx))?;
-        if start_byte + self.cluster_size <= self.fs_len {
-            Some(start_byte)
+        let cluster_idx = idx.as_cluster_idx();
+        if self.valid_cluster_indices.contains(&cluster_idx) {
+            self.cluster_size.checked_mul(usize::fromx(cluster_idx))
         } else {
             None
         }
@@ -240,7 +208,7 @@ impl<'a> Allocator<'a> {
     fn find_next_free_range(&self, cursor: u32) -> Result<Range<ClusterIdx>> {
         let non_used_range = match self.used_ranges.next_not_covered(cursor) {
             NotCoveredRange::Bounded(range) => range,
-            NotCoveredRange::Unbounded(start) => start..self.max_cluster_idx(),
+            NotCoveredRange::Unbounded(start) => start..self.fs_end_cluster_idx(),
         };
 
         if non_used_range.is_empty() {
@@ -250,19 +218,40 @@ impl<'a> Allocator<'a> {
         }
     }
 
-    fn max_cluster_idx(&self) -> ClusterIdx {
-        self.first_valid_index
-            + u32::try_from(self.fs_len / self.cluster_size).expect("FAT32 cluster index must fit into a u32")
+    fn fs_end_cluster_idx(&self) -> ClusterIdx {
+        self.valid_cluster_indices.end
+    }
+
+    /// Splits the `Allocator` into an `AllocatedReader` and an `Allocator`: the `AllocatedReader` can
+    /// only read clusters that were allocated by `self`, the `Allocator` can only write and read
+    /// clusters that could have been allocated by `self` but were not yet allocated.
+    pub fn split_into_reader(self) -> (AllocatedReader<'a>, Self) {
+        let reader = AllocatedReader {
+            fs_ptr: self.fs_ptr,
+            valid_cluster_indices: self.valid_cluster_indices.start..self.cursor.get(),
+            cluster_size: self.cluster_size,
+            _lifetime: self._lifetime,
+        };
+
+        let allocator = Self {
+            fs_ptr: self.fs_ptr,
+            valid_cluster_indices: self.cursor.get()..self.valid_cluster_indices.end,
+            cursor: self.cursor,
+            used_ranges: self.used_ranges,
+            cluster_size: self.cluster_size,
+            _lifetime: self._lifetime,
+        };
+
+        (reader, allocator)
     }
 }
 
 
 /// Allows to read clusters that were allocated by the `Allocator` instance that produced `self`, but not to allocate
 /// any clusters.
-// no first_valid_index because in our use case it's always 0
 pub struct AllocatedReader<'a> {
     fs_ptr: *const u8,
-    fs_len: usize,
+    valid_cluster_indices: Range<ClusterIdx>,
     cluster_size: usize,
     _lifetime: PhantomData<&'a ()>,
 }
@@ -279,11 +268,11 @@ impl<'a> AllocatedReader<'a> {
     }
 
     /// Returns the offset from `self.fs_ptr` at which the cluster `idx` starts or None if the cluster is not covered by
-    /// `self`, i.e. if the offset is not in `0..=self.fs_len - self.cluster_size`.
+    /// `self`, i.e. if `idx` is not in `self.valid_cluster_indices`.
     fn cluster_start_byte(&self, idx: &AllocatedClusterIdx) -> Option<usize> {
-        let start_byte = usize::fromx(idx.0).checked_mul(self.cluster_size)?;
-        if start_byte + self.cluster_size <= self.fs_len {
-            Some(start_byte)
+        let cluster_idx = idx.as_cluster_idx();
+        if self.valid_cluster_indices.contains(&cluster_idx) {
+            self.cluster_size.checked_mul(usize::fromx(cluster_idx))
         } else {
             None
         }

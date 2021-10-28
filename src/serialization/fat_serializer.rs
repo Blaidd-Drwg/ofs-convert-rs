@@ -104,8 +104,10 @@ impl<'a> FatTreeSerializer<'a> {
 
             for (range_fragment, forbidden) in self.forbidden_ranges.split_overlapping(cluster_range) {
                 if forbidden {
-                    let mut copied_ranges =
-                        self.copy_data_to_new_clusters(&mut data_cluster_range, range_fragment.len())?;
+                    let mut copied_ranges = self.copy_data_to_new_clusters(
+                        &mut data_cluster_range,
+                        range_fragment.end - range_fragment.start,
+                    )?;
                     non_overlapping.data_ranges.append(&mut copied_ranges);
                 } else {
                     data_cluster_range
@@ -123,7 +125,7 @@ impl<'a> FatTreeSerializer<'a> {
     fn copy_data_to_new_clusters<I: Iterator<Item = DataClusterIdx>>(
         &self,
         mut iter: &mut I,
-        mut len: usize,
+        mut len: u32,
     ) -> Result<Vec<Range<ClusterIdx>>> {
         let mut copied_fragments = Vec::new();
         while len > 0 {
