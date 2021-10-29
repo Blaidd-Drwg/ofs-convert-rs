@@ -38,7 +38,9 @@ impl<'a> FatTreeSerializer<'a> {
     pub fn serialize_directory_tree(&mut self) -> Result<()> {
         // SAFETY: safe because `ROOT_FAT_IDX` belongs to the root directory
         let root_child_count = unsafe { self.fat_fs.dir_content_iter(ROOT_FAT_IDX).count() };
-        self.archive_root_child_count(root_child_count.try_into().unwrap())?;
+        self.archive_root_child_count(
+            u32::try_from(root_child_count).expect("Directory cannot have more children than fs has clusters"),
+        )?;
         // SAFETY: safe because `ROOT_FAT_IDX` belongs to the root directory
         unsafe { self.serialize_directory_content(ROOT_FAT_IDX) }
     }
@@ -48,7 +50,10 @@ impl<'a> FatTreeSerializer<'a> {
         let first_fat_idx = file.dentry.first_fat_index();
         // SAFETY: safe because `first_fat_index` belongs to a directory
         let child_count = unsafe { self.fat_fs.dir_content_iter(first_fat_idx).count() };
-        self.archive_directory(file, child_count.try_into().unwrap())?;
+        self.archive_directory(
+            file,
+            u32::try_from(child_count).expect("Directory cannot have more children than fs has clusters"),
+        )?;
         // SAFETY: safe because `first_fat_index` belongs to a directory
         unsafe {
             self.serialize_directory_content(first_fat_idx)?;

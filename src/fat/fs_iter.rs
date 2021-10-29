@@ -38,8 +38,9 @@ where I: Iterator<Item = &'a FatPseudoDentry>
     fn next(&mut self) -> Option<Self::Item> {
         let file_name;
         let dentry;
-        if self.pseudo_dentry_iter.peek()?.is_dentry() {
-            dentry = self.pseudo_dentry_iter.next().unwrap().as_dentry().unwrap();
+        if let Some(peeked_dentry) = self.pseudo_dentry_iter.peek()?.as_dentry() {
+            dentry = peeked_dentry;
+            self.pseudo_dentry_iter.next(); // consume peeked dentry
             file_name = dentry.read_short_file_name();
         } else {
             file_name = self.read_long_file_name();

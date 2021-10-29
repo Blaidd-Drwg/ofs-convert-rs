@@ -159,12 +159,13 @@ impl<'a> Ext4Fs<'a> {
     /// Therefore, the inode returned by the first call to `allocate_inode` should be used for lost+found.
     pub fn allocate_inode(&mut self, is_dir: bool) -> Result<Inode<'a>> {
         let inode_no = self.last_allocated_inode_no.checked_add(1);
-        if inode_no.is_none() || inode_no.unwrap() > self.superblock().max_inode_no() {
-            bail!("No free inodes left");
+        match inode_no.filter(|&inode_no| inode_no <= self.superblock().max_inode_no()) {
+            Some(inode_no) => {
+                self.last_allocated_inode_no = inode_no;
+                Ok(self.allocate_inode_with_no(inode_no, is_dir))
+            },
+            None => bail!("No free inodes left")
         }
-        let inode_no = inode_no.unwrap();
-        self.last_allocated_inode_no = inode_no;
-        Ok(self.allocate_inode_with_no(inode_no, is_dir))
     }
 
     /// PANICS: Panics if an inode with number `inode_no` was already allocated or does not exist.
