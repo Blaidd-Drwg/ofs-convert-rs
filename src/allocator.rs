@@ -170,6 +170,7 @@ impl<'a> Allocator<'a> {
     }
 
     /// PANICS: Panics if `idx` out of bounds. This is only possible if `idx` was not allocated by `self`.
+    #[allow(dead_code)]
     pub fn cluster(&'a self, idx: &AllocatedClusterIdx) -> &[u8] {
         let start_byte = self
             .cluster_start_byte(idx)

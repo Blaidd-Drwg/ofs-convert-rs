@@ -163,8 +163,8 @@ impl<'a> Ext4Fs<'a> {
             Some(inode_no) => {
                 self.last_allocated_inode_no = inode_no;
                 Ok(self.allocate_inode_with_no(inode_no, is_dir))
-            },
-            None => bail!("No free inodes left")
+            }
+            None => bail!("No free inodes left"),
         }
     }
 

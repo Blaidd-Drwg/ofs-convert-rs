@@ -24,6 +24,7 @@ impl<'a> Bitmap<'a> {
     }
 
     /// PANICS: Panics if `idx` out of bounds
+    #[allow(dead_code)]
     pub fn clear(&mut self, idx: usize) {
         let (data_idx, bit_idx) = idx.div_rem(&8);
         self.data[data_idx] &= !(1 << bit_idx);
