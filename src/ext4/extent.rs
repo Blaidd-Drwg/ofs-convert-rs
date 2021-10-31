@@ -398,12 +398,12 @@ mod tests {
         const LEVEL_COUNT: usize = 4;
         const BLOCK_SIZE: BlockSize = 4096;
         let (extent_count, block_count) = perfect_extent_tree(LEVEL_COUNT, BLOCK_SIZE);
-        assert_eq!(ExtentTree::required_block_count(extent_count, BLOCK_SIZE), block_count,);
+        assert_eq!(ExtentTree::required_block_count(extent_count, BLOCK_SIZE), block_count);
     }
 
     #[test]
     fn full_four_levels_plus_one() {
-        // compute extent and block counts of a full three-level tree first
+        // compute extent and block counts of a full four-level tree first
         const LEVEL_COUNT: usize = 4;
         const BLOCK_SIZE: BlockSize = 4096;
         let (mut extent_count, mut block_count) = perfect_extent_tree(LEVEL_COUNT, BLOCK_SIZE);
@@ -412,7 +412,34 @@ mod tests {
         // second level (3 blocks)
         extent_count += 1;
         block_count += 1 + 3;
-        assert_eq!(ExtentTree::required_block_count(extent_count, BLOCK_SIZE), block_count,);
+        assert_eq!(ExtentTree::required_block_count(extent_count, BLOCK_SIZE), block_count);
+    }
+
+    #[test]
+    fn full_four_levels_minus_one_block() {
+        // compute extent and block counts of a full four-level tree first
+        const LEVEL_COUNT: usize = 4;
+        const BLOCK_SIZE: BlockSize = 4096;
+        let (mut extent_count, mut block_count) = perfect_extent_tree(LEVEL_COUNT, BLOCK_SIZE);
+
+        let extents_per_block: usize = (usize::fromx(BLOCK_SIZE) / size_of::<ExtentTreeElement>()) - 1;
+        // removing `extents_per_block` extents removes a single block
+        extent_count -= extents_per_block;
+        block_count -= 1;
+        assert_eq!(ExtentTree::required_block_count(extent_count, BLOCK_SIZE), block_count);
+    }
+
+    #[test]
+    fn full_four_levels_minus_almost_one_block() {
+        // compute extent and block counts of a full four-level tree first
+        const LEVEL_COUNT: usize = 4;
+        const BLOCK_SIZE: BlockSize = 4096;
+        let (mut extent_count, block_count) = perfect_extent_tree(LEVEL_COUNT, BLOCK_SIZE);
+
+        let extents_per_block: usize = (usize::fromx(BLOCK_SIZE) / size_of::<ExtentTreeElement>()) - 1;
+        // removing `extents_per_block - 1` extents doesn't change the number of blocks
+        extent_count -= extents_per_block - 1;
+        assert_eq!(ExtentTree::required_block_count(extent_count, BLOCK_SIZE), block_count);
     }
 
     /// Returns the extent count and block count of an extent tree with `level_count` levels in which adding one more
