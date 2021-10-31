@@ -191,7 +191,7 @@ impl<'a> Allocator<'a> {
 
     pub fn free_block_count(&self) -> usize {
         self.used_ranges
-            .free_element_count(self.cursor.get(), self.fs_end_cluster_idx())
+            .free_element_count(self.cursor.get()..self.fs_end_cluster_idx())
     }
 
     /// Returns the offset from `self.fs_ptr` at which the cluster `idx` starts or None if the cluster is not covered by

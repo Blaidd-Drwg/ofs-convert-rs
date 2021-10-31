@@ -38,7 +38,6 @@ const_assert!(size_of::<usize>() <= size_of::<u64>());
 // TODOs:
 // Testing:
 // - block device
-// - `Ranges::free_element_count`
 // - `required_block_count`
 // Features:
 // - allow manually increasing number of inodes

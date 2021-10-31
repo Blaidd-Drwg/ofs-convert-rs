@@ -156,15 +156,19 @@ impl<'a, Idx: Ord + Copy> FromIterator<Range<Idx>> for Ranges<Idx> {
 impl<'a, Idx: Ord + Copy> Ranges<Idx>
 where Range<Idx>: ExactSizeIterator
 {
-    pub fn free_element_count(&self, start_idx: Idx, end_idx: Idx) -> usize {
-        let mut current_idx = start_idx;
-        let mut count = 0;
-        while current_idx < end_idx {
+    /// Returns the number of non-covered items within `within_range`.
+    /// PANICS: Panics if the count would overflow `usize`.
+    pub fn free_element_count(&self, within_range: Range<Idx>) -> usize {
+        let mut current_idx = within_range.start;
+        let mut count = 0usize;
+        while current_idx < within_range.end {
             let range = match self.next_not_covered(current_idx) {
-                NotCoveredRange::Bounded(Range { start, end }) => start..end.min(end_idx),
-                NotCoveredRange::Unbounded(start) => start..end_idx,
+                NotCoveredRange::Bounded(Range { start, end }) => start..end.min(within_range.end),
+                NotCoveredRange::Unbounded(start) => start..within_range.end,
             };
-            count += range.len();
+            count = count
+                .checked_add(range.len())
+                .expect("Number of free elements in range overflows usize");
             current_idx = range.end;
         }
         count
@@ -226,46 +230,64 @@ mod tests {
 
     #[test]
     fn not_covered_start() {
-        let mut ranges = Ranges { ranges: vec![0..2, 6..9, 11..14] };
+        let ranges = Ranges { ranges: vec![0..2, 6..9, 11..14] };
         assert_eq!(ranges.next_not_covered(2), NotCoveredRange::Bounded(2..6));
     }
 
     #[test]
     fn not_covered_middle() {
-        let mut ranges = Ranges { ranges: vec![0..2, 6..9, 11..14] };
+        let ranges = Ranges { ranges: vec![0..2, 6..9, 11..14] };
         assert_eq!(ranges.next_not_covered(4), NotCoveredRange::Bounded(4..6));
     }
 
     #[test]
     fn not_covered_covered() {
-        let mut ranges = Ranges { ranges: vec![0..2, 6..9, 11..14] };
+        let ranges = Ranges { ranges: vec![0..2, 6..9, 11..14] };
         assert_eq!(ranges.next_not_covered(0), NotCoveredRange::Bounded(2..6));
     }
 
     #[test]
     fn not_covered_unbounded() {
-        let mut ranges = Ranges { ranges: vec![0..2, 6..9, 11..14] };
+        let ranges = Ranges { ranges: vec![0..2, 6..9, 11..14] };
         assert_eq!(ranges.next_not_covered(12), NotCoveredRange::Unbounded(14));
     }
 
     #[test]
     fn not_covered_when_empty() {
-        let mut ranges = Ranges { ranges: Vec::new() };
+        let ranges = Ranges { ranges: Vec::new() };
         assert_eq!(ranges.next_not_covered(5), NotCoveredRange::Unbounded(5));
     }
 
     #[test]
     fn split_overlapping_short() {
-        let mut ranges = Ranges { ranges: vec![0..2, 6..9, 11..14] };
+        let ranges = Ranges { ranges: vec![0..2, 6..9, 11..14] };
         assert_eq!(ranges.split_overlapping(5..7), vec![(5..6, false), (6..7, true)]);
     }
 
     #[test]
     fn split_overlapping_long() {
-        let mut ranges = Ranges { ranges: vec![0..2, 6..9, 11..14] };
+        let ranges = Ranges { ranges: vec![0..2, 6..9, 11..14] };
         assert_eq!(
             ranges.split_overlapping(0..19),
             vec![(0..2, true), (2..6, false), (6..9, true), (9..11, false), (11..14, true), (14..19, false)]
         );
+    }
+
+    #[test]
+    fn free_element_count_exact() {
+        let ranges = Ranges { ranges: vec![1..2, 6..9, 11..14] };
+        assert_eq!(ranges.free_element_count(1..14), 6);
+    }
+
+    #[test]
+    fn free_element_count_outside() {
+        let ranges = Ranges { ranges: vec![1..2, 6..9, 11..14] };
+        assert_eq!(ranges.free_element_count(0..19), 12);
+    }
+
+    #[test]
+    fn free_element_count_inside() {
+        let ranges = Ranges { ranges: vec![1..2, 6..9, 11..14] };
+        assert_eq!(ranges.free_element_count(7..12), 2);
     }
 }
