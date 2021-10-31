@@ -261,6 +261,7 @@ dependencies = [
  "memmap",
  "nix",
  "num",
+ "rand",
  "static_assertions",
  "tempfile",
  "text_io",

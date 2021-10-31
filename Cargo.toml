@@ -24,3 +24,4 @@ cmake = "0.1.45"
 
 [dev-dependencies]
 tempfile = "3.2.0"
+rand = "0.8.4"

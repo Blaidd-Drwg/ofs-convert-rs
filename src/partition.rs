@@ -59,7 +59,6 @@ impl<'a> Partition<'a> {
     fn is_mounted(partition_path: &Path) -> Result<bool> {
         let absolute_path = partition_path.canonicalize()?;
         let path_str = absolute_path.to_str().context("Partition path is not valid UTF-8")?;
-        println!("{}", path_str);
         let output_bytes = Command::new("mount").output()?.stdout;
         let output = String::from_utf8(output_bytes).expect("mount output is not valid UTF-8");
         Ok(output.lines().any(|line| line.starts_with(path_str)))
@@ -90,25 +89,42 @@ impl<'a> Partition<'a> {
 mod tests {
     use std::io::{self, Write};
 
+    use itertools::Itertools;
     use tempfile::NamedTempFile;
+    use rand::{self, Rng};
+    use rand::distributions::{Standard};
 
     use super::*;
 
     #[test]
     fn opens_file() {
         const FILE_SIZE: usize = 6427;
+        let content = rand::thread_rng().sample_iter(&Standard).take(FILE_SIZE).collect_vec();
         let mut tmp_file = NamedTempFile::new().unwrap();
-        tmp_file.as_file_mut().write(&[0; FILE_SIZE]).unwrap();
+        tmp_file.as_file_mut().write_all(&content).unwrap();
 
-        let partition = Partition::open(tmp_file.path()).unwrap();
+        let mut partition = Partition::open(tmp_file.path()).unwrap();
         assert_eq!(partition.len(), FILE_SIZE);
+        let part_content = unsafe { std::slice::from_raw_parts(partition.as_mut_ptr(), FILE_SIZE) };
+        assert_eq!(part_content, content);
     }
 
     #[test]
-    #[ignore] // requires sudo
+    #[ignore] // requires sudo or group membership in "disk"
     fn opens_block_device() {
-        const BLOCK_DEVICE: &str = "/dev/sda"; // should use a loop device
-        assert!(Partition::open(BLOCK_DEVICE).is_ok());
+        const FILE_SIZE: usize = 2560; // must be multiple of 512
+        let content = rand::thread_rng().sample_iter(&Standard).take(FILE_SIZE).collect_vec();
+        let mut tmp_file = NamedTempFile::new().unwrap();
+        tmp_file.as_file_mut().write_all(&content).unwrap();
+
+        let path_str = tmp_file.path().to_str().unwrap();
+        let loop_cmd = Command::new("losetup").args(["-f", "--show", path_str]).output();
+        let loop_device = String::from_utf8(loop_cmd.unwrap().stdout).unwrap().trim().to_string();
+        let mut partition = Partition::open(loop_device).unwrap();
+
+        assert_eq!(partition.len(), FILE_SIZE);
+        let part_content = unsafe { std::slice::from_raw_parts(partition.as_mut_ptr(), FILE_SIZE) };
+        assert_eq!(part_content, content);
     }
 
     #[test]

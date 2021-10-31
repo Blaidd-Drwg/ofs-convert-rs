@@ -191,7 +191,6 @@ impl<'a> FatFs<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::array::IntoIter;
     use std::collections::HashSet;
     use std::iter::FromIterator;
 

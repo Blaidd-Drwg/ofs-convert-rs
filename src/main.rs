@@ -36,8 +36,6 @@ const_assert!(size_of::<usize>() >= size_of::<u32>());
 const_assert!(size_of::<usize>() <= size_of::<u64>());
 
 // TODOs:
-// Testing:
-// - block device
 // Features:
 // - allow manually increasing number of inodes
 // - improve inodes_per_group heuristic in `SuperBlock`
