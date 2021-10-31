@@ -194,7 +194,7 @@ impl<'a> ExtentTree<'a> {
             return 0;
         }
 
-        let extents_per_block = usize::fromx(block_size) / size_of::<ExtentTreeElement>();
+        let extents_per_block = (usize::fromx(block_size) / size_of::<ExtentTreeElement>()) - 1;
         let level_count = 1
             + (extent_count as f64 / (EXTENT_ENTRIES_IN_INODE - 1) as f64)
                 .log(extents_per_block as f64)
@@ -378,5 +378,55 @@ impl<'a> ExtentTreeLevel<'a> {
             self.header.valid_entry_count += 1;
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inode_extents() {
+        assert_eq!(
+            ExtentTree::required_block_count(usize::from(EXTENT_ENTRIES_IN_INODE) - 1, 1024),
+            0,
+        );
+    }
+
+    #[test]
+    fn full_four_levels() {
+        const LEVEL_COUNT: usize = 4;
+        const BLOCK_SIZE: BlockSize = 4096;
+        let (extent_count, block_count) = perfect_extent_tree(LEVEL_COUNT, BLOCK_SIZE);
+        assert_eq!(ExtentTree::required_block_count(extent_count, BLOCK_SIZE), block_count,);
+    }
+
+    #[test]
+    fn full_four_levels_plus_one() {
+        // compute extent and block counts of a full three-level tree first
+        const LEVEL_COUNT: usize = 4;
+        const BLOCK_SIZE: BlockSize = 4096;
+        let (mut extent_count, mut block_count) = perfect_extent_tree(LEVEL_COUNT, BLOCK_SIZE);
+
+        // adding one extent makes the tree deeper (1 block) and adds one more path towards a leaf starting at the
+        // second level (3 blocks)
+        extent_count += 1;
+        block_count += 1 + 3;
+        assert_eq!(ExtentTree::required_block_count(extent_count, BLOCK_SIZE), block_count,);
+    }
+
+    /// Returns the extent count and block count of an extent tree with `level_count` levels in which adding one more
+    /// extent would require adding another level.
+    fn perfect_extent_tree(level_count: usize, block_size: BlockSize) -> (usize, usize) {
+        assert!(level_count > 0);
+        let extents_per_block = (usize::fromx(block_size) / size_of::<ExtentTreeElement>()) - 1;
+        assert!(extents_per_block > 1);
+        let mut current_level_extent_count = usize::from(EXTENT_ENTRIES_IN_INODE) - 1;
+        let mut current_level_block_count = 0; // inode
+        for _current_level in 1..level_count {
+            current_level_block_count += current_level_extent_count;
+            current_level_extent_count *= extents_per_block;
+        }
+        (current_level_extent_count, current_level_block_count)
     }
 }
