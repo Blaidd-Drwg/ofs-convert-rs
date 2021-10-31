@@ -1,6 +1,8 @@
 use std::mem::{size_of, MaybeUninit};
 use std::ops::Range;
 
+use num::Integer;
+
 use crate::bitmap::Bitmap;
 use crate::ext4::{
     BlockCount, BlockGroupIdx, BlockIdx, BlockSize, Ext4GroupDescriptor, HasSuperBlock, InodeCount, InodeInner,
@@ -66,7 +68,7 @@ impl<'a> BlockGroup<'a> {
         match info.superblock_construction_info {
             SuperBlockConstructionInfo::Yes { group_descriptor_count, .. } => {
                 let gdt_size = size_of::<Ext4GroupDescriptor>() * group_descriptor_count;
-                let gdt_blocks_count = gdt_size.div_ceil(usize::fromx(info.block_size));
+                let gdt_blocks_count = gdt_size.div_ceil(&usize::fromx(info.block_size));
                 let metadata_blocks = std::mem::take(block_group_metadata);
                 let (gdt_blocks, remaining_blocks) = Self::split_at_block_mut(metadata_blocks, gdt_blocks_count, info);
                 *block_group_metadata = remaining_blocks;

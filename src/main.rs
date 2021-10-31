@@ -1,6 +1,5 @@
 #![feature(step_trait)]
 #![feature(iter_advance_by)]
-#![feature(int_roundings)]
 #![feature(maybe_uninit_extra)]
 #![feature(maybe_uninit_slice)]
 #![feature(maybe_uninit_write_slice)]
@@ -49,7 +48,7 @@ const_assert!(size_of::<usize>() <= size_of::<u64>());
 
 fn main() -> Result<()> {
     let matches =
-        App::new("ofs-convert")
+        App::new("ofs-convert-rs")
             .arg(
                 Arg::with_name("PARTITION_PATH")
                     .required(true)

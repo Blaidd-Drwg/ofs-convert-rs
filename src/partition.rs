@@ -90,9 +90,9 @@ mod tests {
     use std::io::{self, Write};
 
     use itertools::Itertools;
-    use tempfile::NamedTempFile;
+    use rand::distributions::Standard;
     use rand::{self, Rng};
-    use rand::distributions::{Standard};
+    use tempfile::NamedTempFile;
 
     use super::*;
 

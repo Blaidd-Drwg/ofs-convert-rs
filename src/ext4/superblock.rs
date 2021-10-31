@@ -1,6 +1,7 @@
 use std::convert::TryFrom;
 
 use anyhow::{bail, Context, Result};
+use num::Integer;
 use uuid::Uuid;
 
 use crate::ext4::{
@@ -220,7 +221,7 @@ impl SuperBlock {
             );
         }
 
-        let block_group_count = data_block_count.div_ceil(BlockCount::fromx(sb.s_blocks_per_group));
+        let block_group_count = data_block_count.div_ceil(&BlockCount::fromx(sb.s_blocks_per_group));
         let block_group_count = BlockGroupCount::try_from(block_group_count)
             // This can only happen with absurdly large filesystems in the petabye range
             .context("Filesystem too large, it would have more than 2^32 block groups.")?;
@@ -287,12 +288,12 @@ impl SuperBlock {
 
     fn gdt_block_count(&self) -> BlockCount {
         let descriptors_per_gdt_block = self.block_size() / BlockSize::from(self.s_desc_size);
-        BlockCount::fromx(self.block_group_count().div_ceil(descriptors_per_gdt_block))
+        BlockCount::fromx(self.block_group_count().div_ceil(&descriptors_per_gdt_block))
     }
 
     pub fn inode_table_block_count(&self) -> BlockCount {
         let inode_table_size = usize::fromx(self.s_inodes_per_group) * usize::from(self.s_inode_size);
-        inode_table_size.div_ceil(usize::fromx(self.block_size()))
+        inode_table_size.div_ceil(&usize::fromx(self.block_size()))
     }
 
     pub fn block_size(&self) -> BlockSize {
@@ -322,7 +323,7 @@ impl SuperBlock {
     pub fn block_group_count(&self) -> BlockGroupCount {
         let count = self
             .block_count_without_padding()
-            .div_ceil(BlockCount::fromx(self.s_blocks_per_group));
+            .div_ceil(&BlockCount::fromx(self.s_blocks_per_group));
         BlockGroupCount::try_from(count)
             .expect("We made sure in `Self::new` that the block group count fits into a u32.")
     }

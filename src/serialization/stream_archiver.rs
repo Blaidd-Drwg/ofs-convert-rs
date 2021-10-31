@@ -138,7 +138,7 @@ impl<'a> StreamArchiver<'a> {
     }
 
     /// SAFETY: Only safe if consistent with the preceding header. I.e. either:
-    /// 1) The preceding header `h` is followed by `h.len` objects. Then `object must be of type `Header`; or
+    /// 1) The preceding header `h` is followed by `h.len` objects. Then `object` must be of type `Header`; or
     /// 2) The preceding header `h` is followed by fewer than `h.len` objects. Then `T` must have the ID `h.type_id`.
     /// PANICS: Panics if `size_of::<Option<PageIdx>>() + size_of::<T>() > self.page_size`
     unsafe fn add_object<T>(&mut self, object: T) -> Result<()> {

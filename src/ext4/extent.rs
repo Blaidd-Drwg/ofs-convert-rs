@@ -4,6 +4,7 @@ use std::ops::Range;
 use std::slice;
 
 use anyhow::{bail, Context, Result};
+use num::Integer;
 use static_assertions::const_assert_eq;
 
 use crate::allocator::{AllocatedClusterIdx, Allocator};
@@ -202,25 +203,22 @@ impl<'a> ExtentTree<'a> {
 
         let mut result = 0;
         for level in 1..level_count {
-            let blocks_in_level = extent_count.div_ceil(extents_per_block.pow(level));
+            let blocks_in_level = extent_count.div_ceil(&extents_per_block.pow(level));
             result += blocks_in_level;
         }
         result
     }
 
     pub fn add_extent(&mut self, extent: Extent) -> Result<Vec<BlockIdx>> {
-        match self.root.add_extent(extent, self.allocator) {
-            Ok(allocated_blocks) => Ok(allocated_blocks),
-            Err(_) => {
-                let block_for_previous_root = self.make_deeper()?;
-                let mut allocated_blocks = self
-                    .root
-                    .add_extent(extent, self.allocator)
-                    .expect("Unable to add new extent despite `make_deeper` succeeding");
-                allocated_blocks.push(block_for_previous_root);
-                Ok(allocated_blocks)
-            }
-        }
+        self.root.add_extent(extent, self.allocator).or_else(|_| {
+            let block_for_previous_root = self.make_deeper()?;
+            let mut allocated_blocks = self
+                .root
+                .add_extent(extent, self.allocator)
+                .expect("Unable to add new extent despite `make_deeper` succeeding");
+            allocated_blocks.push(block_for_previous_root);
+            Ok(allocated_blocks)
+        })
     }
 
     fn make_deeper(&mut self) -> Result<BlockIdx> {
