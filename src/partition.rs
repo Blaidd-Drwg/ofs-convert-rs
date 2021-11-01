@@ -88,11 +88,14 @@ impl<'a> Partition<'a> {
 #[cfg(test)]
 mod tests {
     use std::io::{self, Write};
+    use std::os::unix::fs::symlink;
 
     use itertools::Itertools;
+    use nix::sys::stat::Mode;
+    use nix::unistd::mkfifo;
     use rand::distributions::Standard;
     use rand::{self, Rng};
-    use tempfile::NamedTempFile;
+    use tempfile::{tempdir, NamedTempFile};
 
     use super::*;
 
@@ -129,7 +132,21 @@ mod tests {
 
     #[test]
     fn opens_symlink() {
-        unimplemented!()
+        const FILE_SIZE: usize = 6427;
+        const FILE_NAME: &str = "file";
+        const LINK_NAME: &str = "link";
+        let content = rand::thread_rng().sample_iter(&Standard).take(FILE_SIZE).collect_vec();
+        let tmp_dir = tempdir().unwrap();
+        let file_path = tmp_dir.path().join(FILE_NAME);
+        let link_path = tmp_dir.path().join(LINK_NAME);
+        let mut tmp_file = File::create(&file_path).unwrap();
+        tmp_file.write_all(&content).unwrap();
+        symlink(&file_path, &link_path).unwrap();
+
+        let mut partition = Partition::open(link_path).unwrap();
+        assert_eq!(partition.len(), FILE_SIZE);
+        let part_content = unsafe { std::slice::from_raw_parts(partition.as_mut_ptr(), FILE_SIZE) };
+        assert_eq!(part_content, content);
     }
 
     #[test]
@@ -155,36 +172,30 @@ mod tests {
 
     #[test]
     fn returns_err_if_not_file_or_device() {
-        unimplemented!()
+        const FILE_NAME: &str = "file";
+        let tmp_dir = tempdir().unwrap();
+        let fifo_path = tmp_dir.path().join(FILE_NAME);
+        mkfifo(&fifo_path, Mode::S_IRWXU).unwrap();
+        assert!(Partition::open(tmp_dir.path()).is_err());
     }
 
     #[test]
     fn returns_err_if_file_locked() {
-        unimplemented!()
+        let mut tmp_file = NamedTempFile::new().unwrap();
+        tmp_file.write_all(&[0; 512]).unwrap();
+        tmp_file.as_file().try_lock_exclusive().unwrap();
+        assert!(Partition::open(tmp_file.path()).is_err());
     }
 
     #[test]
+    #[ignore] // requires sudo
     fn returns_err_if_file_mounted() {
         unimplemented!()
     }
 
     #[test]
-    fn returns_err_if_not_a_fat_partition() {
-        unimplemented!()
-    }
-
-    #[test]
+    #[ignore] // requires sudo
     fn has_correct_is_mounted() {
-        unimplemented!()
-    }
-
-    #[test]
-    fn has_correct_size() {
-        unimplemented!()
-    }
-
-    #[test]
-    fn has_working_mmap() {
         unimplemented!()
     }
 
