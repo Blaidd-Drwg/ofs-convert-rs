@@ -129,8 +129,7 @@ class OfsConvertTest(unittest.TestCase):
         args_file = input_dir / 'mkfs.args'
         mkfs_call = 'mkfs.fat {} {}'.format(image_file_path,
                                             args_file.read_text().rstrip('\n'))
-        tool_runner.run(mkfs_call, 'mkfs.fat', shell=True,
-                        custom_output_checker=self._check_mkfs_fat_output)
+        tool_runner.run(mkfs_call, 'mkfs.fat', shell=True)
         with image_mounter.mount(image_file_path,
                                  FsType.VFAT, False) as mount_point:
             tool_runner.run([str(input_dir / 'generate.sh'), str(mount_point)],

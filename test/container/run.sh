@@ -10,5 +10,4 @@ docker run --rm \
            -v "$TEST_DIR":/test \
            -v "$TARGET_DIR":/target \
            -e OFS_CONVERT_TOOL_TIMEOUT="$OFS_CONVERT_TOOL_TIMEOUT" \
-           -e CMAKE_CONFIGURATION="$CMAKE_CONFIGURATION" \
            ofs-convert-testing
