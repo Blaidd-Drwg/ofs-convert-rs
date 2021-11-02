@@ -15,7 +15,7 @@ FROM rustlang/rust:nightly as cacher
 
 FROM rustlang/rust:nightly as tester
     RUN apt-get update && \
-        apt-get install -y dosfstools python3 rsync uuid uuid-dev && \
+        apt-get install -y dosfstools python3 rsync sudo uuid uuid-dev && \
         rm -rf /var/lib/apt/lists/*
 
     RUN mkdir -p /dependencies/target
