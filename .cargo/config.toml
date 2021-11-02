@@ -1,0 +1,2 @@
+[alias]
+test-sudo = "-Z unstable-options --config target.'cfg(all())'.runner=\"sudo\" test -- --ignored"
