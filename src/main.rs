@@ -3,6 +3,7 @@
 #![feature(maybe_uninit_extra)]
 #![feature(maybe_uninit_slice)]
 #![feature(maybe_uninit_write_slice)]
+#![feature(exit_status_error)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
 mod allocator;

@@ -59,11 +59,11 @@ impl<'a> Partition<'a> {
     fn is_mounted(partition_path: &Path) -> Result<bool> {
         let absolute_path = partition_path.canonicalize()?;
         let path_str = absolute_path.to_str().context("Partition path is not valid UTF-8")?;
-        let output_bytes = Command::new("mount").output()?.stdout;
-        let output = String::from_utf8(output_bytes).expect("mount output is not valid UTF-8");
+        let command_output = Command::new("mount").output()?;
+        command_output.status.exit_ok()?;
+        let output = String::from_utf8(command_output.stdout).expect("mount output is not valid UTF-8");
         Ok(output.lines().any(|line| line.starts_with(path_str)))
     }
-
 
     // declared in linux/fs.h
     // The type is declared as size_t due to a bug that cannot be fixed due to backwards compatibility. If I understand
@@ -190,16 +190,44 @@ mod tests {
     #[test]
     #[ignore] // requires sudo
     fn returns_err_if_file_mounted() {
-        unimplemented!()
+        let path = Path::new("test/example_fat.img");
+        assert!(!Partition::is_mounted(path).unwrap());
+        let mount_dir = tempdir().unwrap();
+        let _umount_on_drop = Mount::new(path, mount_dir.path()).unwrap();
+        assert!(Partition::open(path).is_err());
     }
 
     #[test]
     #[ignore] // requires sudo
     fn has_correct_is_mounted() {
-        unimplemented!()
+        let path = Path::new("test/example_fat.img");
+        assert!(!Partition::is_mounted(path).unwrap());
+        let mount_dir = tempdir().unwrap();
+        let _umount_on_drop = Mount::new(path, mount_dir.path()).unwrap();
+        assert!(Partition::is_mounted(path).unwrap());
     }
 
     fn io_error_kind(err: anyhow::Error) -> io::ErrorKind {
         err.chain().next().unwrap().downcast_ref::<io::Error>().unwrap().kind()
+    }
+
+    struct Mount {
+        target: String,
+    }
+
+    impl Mount {
+        fn new(source: impl AsRef<Path>, target: impl AsRef<Path>) -> Result<Self> {
+            let source_str = source.as_ref().to_str().unwrap();
+            let target_str = target.as_ref().to_str().unwrap();
+            let mount_output = Command::new("mount").args([source_str, target_str]).output()?;
+            mount_output.status.exit_ok()?;
+            Ok(Self { target: target_str.to_string() })
+        }
+    }
+
+    impl Drop for Mount {
+        fn drop(&mut self) {
+            let _ = Command::new("umount").arg(&self.target).status();
+        }
     }
 }
