@@ -1,26 +1,16 @@
-FROM rustlang/rust:nightly AS planner
-    WORKDIR dependencies
-    RUN cargo install cargo-chef
-    COPY . .
-    RUN cargo chef prepare  --recipe-path recipe.json
-
-
-# Only rebuild dependencies if recipe.json changes
-FROM rustlang/rust:nightly as cacher
-    WORKDIR dependencies
-    RUN cargo install cargo-chef
-    COPY --from=planner /dependencies/recipe.json recipe.json
-    RUN cargo chef cook --recipe-path recipe.json
-
-
-FROM rustlang/rust:nightly as tester
+FROM rustlang/rust:nightly
+    WORKDIR project_root
+    ENV CARGO_TARGET_DIR="/target"
+    RUN mkdir /target
     RUN apt-get update && \
         apt-get install -y dosfstools python3 rsync sudo uuid uuid-dev && \
         rm -rf /var/lib/apt/lists/*
-
-    RUN mkdir -p /dependencies/target
-    COPY --from=cacher /dependencies/target /dependencies/target
-    COPY --from=cacher /usr/local/cargo /usr/local/cargo
+    RUN mkdir src && touch src/lib.rs
+    COPY Cargo.toml .
+    COPY Cargo.lock .
+    RUN cargo build
+    RUN cargo test
+    RUN rm -r src
 
     ARG docker_dir
     ADD "$docker_dir/main.sh" /
