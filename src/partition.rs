@@ -98,6 +98,7 @@ mod tests {
     use tempfile::{tempdir, NamedTempFile};
 
     use super::*;
+    use crate::util::tests::backup_copy;
 
     #[test]
     fn opens_file() {
@@ -178,21 +179,23 @@ mod tests {
     #[test]
     #[ignore] // requires sudo
     fn returns_err_if_file_mounted() {
-        let path = Path::new("test/example_fat.img");
-        assert!(!Partition::is_mounted(path).unwrap());
+        const FAT_IMAGE_PATH: &str = "test/example_fat.img";
+        let image_copy = backup_copy(FAT_IMAGE_PATH).unwrap();
+        assert!(!Partition::is_mounted(image_copy.path()).unwrap());
         let mount_dir = tempdir().unwrap();
-        let _umount_on_drop = Mount::new(path, mount_dir.path()).unwrap();
-        assert!(Partition::open(path).is_err());
+        let _umount_on_drop = Mount::new(image_copy.path(), mount_dir.path()).unwrap();
+        assert!(Partition::open(image_copy.path()).is_err());
     }
 
     #[test]
     #[ignore] // requires sudo
     fn has_correct_is_mounted() {
-        let path = Path::new("test/example_fat.img");
-        assert!(!Partition::is_mounted(path).unwrap());
+        const FAT_IMAGE_PATH: &str = "test/example_fat.img";
+        let image_copy = backup_copy(FAT_IMAGE_PATH).unwrap();
+        assert!(!Partition::is_mounted(image_copy.path()).unwrap());
         let mount_dir = tempdir().unwrap();
-        let _umount_on_drop = Mount::new(path, mount_dir.path()).unwrap();
-        assert!(Partition::is_mounted(path).unwrap());
+        let _umount_on_drop = Mount::new(image_copy.path(), mount_dir.path()).unwrap();
+        assert!(Partition::is_mounted(image_copy.path()).unwrap());
     }
 
     fn io_error_kind(err: anyhow::Error) -> io::ErrorKind {

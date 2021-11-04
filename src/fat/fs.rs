@@ -197,9 +197,11 @@ mod tests {
     use super::*;
     use crate::fat::ROOT_FAT_IDX;
     use crate::partition::Partition;
+    use crate::util::tests::backup_copy;
 
     #[test]
     fn iterates_over_dir_content() {
+        const FAT_IMAGE_PATH: &str = "test/example_fat.img";
         const EXPECTED_FILE_NAMES: [&str; 10] = [
             "allocator.rs",
             "bitmap.rs",
@@ -213,8 +215,9 @@ mod tests {
             "util.rs",
         ];
         let expected_file_names = HashSet::from_iter(EXPECTED_FILE_NAMES.iter().map(|s| s.to_string()));
+        let file_copy = backup_copy(FAT_IMAGE_PATH).unwrap();
 
-        let mut partition = Partition::open("test/example_fat.img").unwrap();
+        let mut partition = Partition::open(file_copy.path()).unwrap();
         let file_names: HashSet<_> = unsafe {
             let fat_fs = FatFs::new(partition.as_mut_ptr(), partition.len(), PhantomData).unwrap();
             fat_fs.dir_content_iter(ROOT_FAT_IDX).map(|file| file.name).collect()

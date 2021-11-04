@@ -96,3 +96,17 @@ impl<T> AddUsize<T> for *mut T {
         unsafe { byte_ptr.add(byte_count) as Self }
     }
 }
+
+#[cfg(test)]
+pub mod tests {
+    use std::path::Path;
+
+    use anyhow::Result;
+    use tempfile::NamedTempFile;
+
+    pub fn backup_copy(path: impl AsRef<Path>) -> Result<NamedTempFile> {
+        let backup_copy = NamedTempFile::new()?;
+        std::fs::copy(path, backup_copy.path())?;
+        Ok(backup_copy)
+    }
+}
