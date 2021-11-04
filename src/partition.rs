@@ -155,19 +155,7 @@ mod tests {
         assert!(!Path::new(filename).exists());
         let partition = Partition::open(filename);
         assert!(partition.is_err());
-        assert!(io_error_kind(partition.err().unwrap()) == io::ErrorKind::NotFound);
-    }
-
-    #[test]
-    fn returns_err_if_file_not_writable() {
-        let mut tmp_file = NamedTempFile::new().unwrap();
-        let mut permissions = tmp_file.as_file_mut().metadata().unwrap().permissions();
-        permissions.set_readonly(true);
-        tmp_file.as_file_mut().set_permissions(permissions).unwrap();
-
-        let partition = Partition::open(tmp_file.path());
-        assert!(partition.is_err());
-        assert!(io_error_kind(partition.err().unwrap()) == io::ErrorKind::PermissionDenied);
+        assert_eq!(io_error_kind(partition.err().unwrap()), io::ErrorKind::NotFound);
     }
 
     #[test]
