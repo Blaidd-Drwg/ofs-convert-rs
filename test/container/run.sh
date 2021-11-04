@@ -2,6 +2,7 @@
 PROJECT_ROOT=$(realpath "$(dirname "$0")/../..")
 TEST_DIR=$PROJECT_ROOT/test
 docker run --rm \
+           --tty \
            --privileged \
            -v "$PROJECT_ROOT":/project_root:ro \
            -v "$TEST_DIR":/test \
