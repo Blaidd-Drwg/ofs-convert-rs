@@ -12,8 +12,8 @@ Each `*.test` directory is a single test case, which contains either:
    Testing will be done on temporary copies.
  * a `generate.sh` script, with an accompanying `mkfs.args` file.
    The arguments from `mkfs.args` will be used to create a FAT image, which is then mounted.
-   `generate.sh` will be called with the mount point as an argument and should fill the image with test data.
-   
+   `generate.sh` will be called with the mount point as first argument and the FAT image's path as second argument, and should fill the image with test data.
+
    `mkfs.args` should contain all arguments to `mkfs.fat`, excluding the path to the image file.
    It should always contain:
      - `-F 32`, to select FAT32 mode
