@@ -20,12 +20,13 @@ impl<'a> Partition<'a> {
     pub fn open<P: AsRef<Path>>(partition_path: P) -> Result<Self> {
         let partition_path = partition_path.as_ref().canonicalize()?;
         if Self::is_mounted(partition_path.as_path())? {
-            bail!("Partition is already mounted");
+            bail!("Partition already mounted. Please unmount and try again.");
         }
         let file = OpenOptions::new().read(true).write(true).create(false).open(partition_path)?;
         // the lock is only advisory, other processes may still access the file
         // the lock is automatically released after both file and mmap are dropped
-        file.try_lock_exclusive()?;
+        file.try_lock_exclusive()
+            .context("The partition is marked as locked. Is another process using it?")?;
 
         let size = Self::get_file_size(&file)?;
         // SAFETY: We assume that no other process is modifying the partition

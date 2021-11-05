@@ -41,6 +41,7 @@ const_assert!(size_of::<usize>() <= size_of::<u64>());
 // - improve inodes_per_group heuristic in `SuperBlock`
 // - after/during serialization, mark directory dataclusters as free in allocator
 // - bitmap: set_range would be more efficient, u128 would be more efficient
+// - FAT dentry: handle read only flag, hidden flag, extended attributes
 // Documentation:
 // - README
 // - convention for `expect` messages
@@ -50,11 +51,11 @@ const_assert!(size_of::<usize>() <= size_of::<u64>());
 fn main() -> Result<()> {
     let matches =
         App::new("ofs-convert-rs")
-            .arg(
-                Arg::with_name("PARTITION_PATH")
-                    .required(true)
-                    .help("The partition containing the FAT32 filesystem that should be converted"),
-            )
+            .arg(Arg::with_name("PARTITION_PATH").required(true).help(
+                "The partition containing the FAT32 filesystem that should be converted. This will usually be a block \
+                 device (e.g. /dev/sda1), but it can also be a file containing a disk image. The filesystem must be \
+                 unmounted and cannot be modified by another process during the conversion",
+            ))
             .arg(Arg::with_name("force").long("force").short("f").help(
                 "Skip fsck (can lead to unexpected errors and data loss if the input filesystem is inconsistent)",
             ))
@@ -65,14 +66,14 @@ fn main() -> Result<()> {
         match fsck_fat(partition_path) {
             Ok(true) => (),
             Ok(false) => bail!(
-                "fsck failed. Running ofs-convert on an inconsistent FAT32 partition can lead to unexpected errors \
+                "fsck failed. Running ofs-convert-rs on an inconsistent FAT32 partition can lead to unexpected errors \
                  and data loss. To force the conversion, run again with the '-f' flag."
             ),
             Err(e) => {
-                eprintln!("Error: {}", e);
+                eprintln!("Error: {:#}", e);
                 eprintln!(
-                    "Unable to run fsck. Running ofs-convert on an inconsistent FAT32 partition can lead to \
-                     unexpected errors and data loss."
+                    "Running ofs-convert-rs on an inconsistent FAT32 partition can lead to unexpected errors and data \
+                     loss."
                 );
                 eprint!("Run anyway? [y/N] ");
                 io::stderr().flush()?;
@@ -84,14 +85,19 @@ fn main() -> Result<()> {
         }
     }
 
-    // SAFETY: We've done our best to ensure `partition_path` contains a consistent FAT32 partition
+    // SAFETY: We've done our best to ensure the partition at `partition_path` contains a consistent FAT32 filesystem
     unsafe { ofs_convert(partition_path) }
 }
 
 /// Returns `Ok(true)` if the filesystem check is successful, `Ok(false)` if it fails, and `Err` if fsck fails to run
 /// (e.g. if the command `fsck.fat` is not found).
 fn fsck_fat(partition_path: &str) -> Result<bool> {
-    Ok(Command::new("fsck.fat").arg("-n").arg(partition_path).status()?.success())
+    Ok(Command::new("fsck.fat")
+        .arg("-n")
+        .arg(partition_path)
+        .status()
+        .context("Unable to run fsck.fat")?
+        .success())
 }
 
 fn is_yes(s: &str) -> bool {
@@ -123,8 +129,7 @@ unsafe fn ofs_convert(partition_path: &str) -> Result<()> {
     Ok(())
 }
 
-/// Returns the ranges of `ClusterIdx`s in the partition described by `superblock` that may not be overwritten with ext4
-/// data.
+/// Returns the ranges of `ClusterIdx`s in the partition described by `superblock` that may not contain any file data.
 fn forbidden_ranges(superblock: &SuperBlock, cluster_count: u32) -> Ranges<ClusterIdx> {
     let forbidden_ranges = superblock.block_group_overhead_ranges();
     let mut forbidden_ranges = into_cluster_idx_ranges(forbidden_ranges);
