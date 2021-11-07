@@ -1,0 +1,21 @@
+name: Run all tests inside a Docker container
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    # caching the Docker layers leads to faster CI results, although creating the cache in the end actually makes the job take longer
+    - uses: satackey/action-docker-layer-caching@v0.0.11
+      continue-on-error: true
+    - name: Build the Docker image
+      run: test/container/build.sh
+    - name: Run the tests
+      run: test/container/run.sh
