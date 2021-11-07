@@ -26,7 +26,7 @@ impl<'a> Partition<'a> {
         // the lock is only advisory, other processes may still access the file
         // the lock is automatically released after both file and mmap are dropped
         file.try_lock_exclusive()
-            .context("The partition is marked as locked. Is another process using it?")?;
+            .context("The partition cannot be locked. Is another process using it?")?;
 
         let size = Self::get_file_size(&file)?;
         // SAFETY: We assume that no other process is modifying the partition
@@ -90,6 +90,9 @@ impl<'a> Partition<'a> {
 mod tests {
     use std::io::{self, Write};
     use std::os::unix::fs::symlink;
+    use std::path::PathBuf;
+    use std::thread;
+    use std::time::Duration;
 
     use itertools::Itertools;
     use nix::sys::stat::Mode;
@@ -122,11 +125,8 @@ mod tests {
         let mut tmp_file = NamedTempFile::new().unwrap();
         tmp_file.as_file_mut().write_all(&content).unwrap();
 
-        let path_str = tmp_file.path().to_str().unwrap();
-        let loop_cmd = Command::new("losetup").args(["-f", "--show", path_str]).output();
-        let loop_device = String::from_utf8(loop_cmd.unwrap().stdout).unwrap().trim().to_string();
-        let mut partition = Partition::open(loop_device).unwrap();
-
+        let loop_device = LoopDevice::new(tmp_file.path()).unwrap();
+        let mut partition = Partition::open(&loop_device.path).unwrap();
         assert_eq!(partition.len(), FILE_SIZE);
         let part_content = unsafe { std::slice::from_raw_parts(partition.as_mut_ptr(), FILE_SIZE) };
         assert_eq!(part_content, content);
@@ -220,6 +220,27 @@ mod tests {
     impl Drop for Mount {
         fn drop(&mut self) {
             let _ = Command::new("umount").arg(&self.target).status();
+        }
+    }
+
+    struct LoopDevice {
+        path: PathBuf,
+    }
+
+    impl LoopDevice {
+        fn new(source: impl AsRef<Path>) -> Result<Self> {
+            let source_str = source.as_ref().to_str().unwrap();
+            let loop_cmd = Command::new("losetup").args(["-f", "--show", source_str]).output()?;
+            let loop_device = String::from_utf8(loop_cmd.stdout)?.trim().to_string();
+            // the loop device is sometimes not accessible immediately after the command returns
+            thread::sleep(Duration::from_millis(100));
+            Ok(Self { path: PathBuf::from(loop_device) })
+        }
+    }
+
+    impl Drop for LoopDevice {
+        fn drop(&mut self) {
+            let _ = Command::new("losetup").args(["-d", self.path.to_str().unwrap()]).status();
         }
     }
 }
