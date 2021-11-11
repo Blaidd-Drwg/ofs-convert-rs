@@ -1,5 +1,5 @@
-# ofs-convert-rs
-`ofs-convert-rs` is a proof-of-concept tool for converting a FAT32 filesystem into an ext4 filesystem in-place, using the free space within the filesystem as temporary storage. It is a Rust rewrite of [ofs-convert](https://github.com/Blaidd-Drwg/ofs-convert).
+# ofs-convert-rs [![Tests](https://github.com/Blaidd-Drwg/ofs-convert-rs/actions/workflows/ci.yaml/badge.svg?branch=master)](https://github.com/Blaidd-Drwg/ofs-convert-rs/actions/workflows/ci.yaml)
+`ofs-convert-rs` is a proof-of-concept tool for converting a FAT32 filesystem into an ext4 filesystem in-place, using the free space within the filesystem as temporary storage. It is a Rust rewrite of [ofs-convert](https://github.com/Blaidd-Drwg/ofs-convert) and (for now) runs only on Linux.
 
 
 ### ⚠️ DISCLAIMER ⚠️
@@ -7,7 +7,7 @@ Do not use `ofs-convert-rs` on data that you haven't previously backed up: it's 
 
 
 ## How it works
-The usual way of converting between two filesystems involves copying all files to a separate filesystem, formatting the source partition with the desired target filesystem, and copying all files back. `ofs-convert-rs` greatly speed up this process by leaving the file contents in place and only converting the filesystem-specific metadata structures. Free space in the filesystem is used for temporary storage, so that no additional filesystem is needed and RAM requirements are minimized.
+The usual way of converting between two filesystems involves copying all files to a separate filesystem, formatting the source partition with the desired target filesystem, and copying all files back. `ofs-convert-rs` greatly speeds up this process by leaving the file contents in place and only converting the filesystem-specific metadata structures. Free space in the filesystem is used for temporary storage, so that no additional filesystem is needed and RAM requirements are minimized.
 
 `ofs-convert-rs` performs the conversion with the following steps:
 
