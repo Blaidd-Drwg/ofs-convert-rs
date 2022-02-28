@@ -41,9 +41,8 @@ const_assert!(size_of::<usize>() <= size_of::<u64>());
 // - improve inodes_per_group heuristic in `SuperBlock`
 // - after/during serialization, mark directory dataclusters as free in allocator
 // - bitmap: set_range would be more efficient, u128 would be more efficient
-// - FAT dentry: handle read only flag, hidden flag, extended attributes
+// - FAT dentry: handle hidden flag, extended attributes
 // Documentation:
-// - README
 // - convention for `expect` messages
 // - sometimes using Result where Option would be more idiomatic
 // - add context to Errs

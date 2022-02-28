@@ -13,6 +13,7 @@ pub struct DentryRepresentation {
     pub mod_time: Timestamp,
     pub file_size: u32,
     pub is_dir: bool,
+    pub is_read_only: bool,
 }
 
 impl DentryRepresentation {
@@ -23,6 +24,7 @@ impl DentryRepresentation {
             mod_time: dentry.modify_time_as_unix()?,
             file_size: dentry.file_size,
             is_dir: dentry.is_dir(),
+            is_read_only: dentry.is_read_only(),
         })
     }
 }

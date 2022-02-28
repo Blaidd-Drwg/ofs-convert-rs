@@ -140,7 +140,7 @@ impl InodeInner {
         let group_id = u32::from(getegid());
         LoHiMut::new(&mut self.i_uid, &mut self.l_i_uid_high).set(user_id);
         LoHiMut::new(&mut self.i_gid, &mut self.l_i_gid_high).set(group_id);
-        self.i_mode = DEFAULT_RWX | if dentry.is_dir { DIR_FLAG } else { REG_FLAG };
+        self.i_mode = Self::mode_from_dentry(&dentry);
         self.i_crtime = dentry.create_time;
         self.i_atime = dentry.access_time;
         self.i_mtime = dentry.mod_time;
@@ -189,5 +189,11 @@ impl InodeInner {
 
     fn is_dir(&self) -> bool {
         self.i_mode & DIR_FLAG != 0
+    }
+
+    fn mode_from_dentry(dentry: &DentryRepresentation) -> u16 {
+        let rwx = if dentry.is_read_only { NO_WRITE_PERMS } else { DEFAULT_PERMS };
+        let dir = if dentry.is_dir { DIR_FLAG } else { REG_FLAG };
+        rwx | dir
     }
 }

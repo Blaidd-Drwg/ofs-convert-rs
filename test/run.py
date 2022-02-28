@@ -104,7 +104,7 @@ class OfsConvertTest(unittest.TestCase):
                 if not formatted_path_path.endswith('/'):
                     formatted_path_path += '/'
                 args = ['rsync', '--dry-run', '--itemize-changes', '--archive',
-                        '--checksum', '--no-perms', '--no-owner', '--no-group',
+                        '--checksum', '--perms', '--no-owner', '--no-group',
                         '--delete', '--exclude=/lost+found', formatted_path_path,
                         str(ext_mount)]
                 tool_runner.run(args, 'rsync',

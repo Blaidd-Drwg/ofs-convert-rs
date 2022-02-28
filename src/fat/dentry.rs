@@ -78,6 +78,7 @@ pub struct FatDentry {
 
 impl FatDentry {
     const DIR_FLAG: u8 = 0x10;
+    const READ_ONLY_FLAG: u8 = 0x01;
 
     pub fn first_fat_index(&self) -> FatTableIndex {
         let idx = LoHi::new(&self.first_fat_index_lo, &self.first_fat_index_hi).get();
@@ -91,6 +92,10 @@ impl FatDentry {
     /// True iff the dentry represents either the current directory `.` or the parent directory `..`
     pub fn is_dot_dir(&self) -> bool {
         self.short_name[0] == b'.'
+    }
+
+    pub fn is_read_only(&self) -> bool {
+        self.attrs & Self::READ_ONLY_FLAG != 0
     }
 
     /// True iff the file name has an extension
