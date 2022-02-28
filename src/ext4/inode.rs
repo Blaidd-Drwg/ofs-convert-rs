@@ -23,13 +23,16 @@ const INODE_USES_EXTENTS: u32 = 0x00080000;
 const DIR_FLAG: u16 = 0o040_000;
 const REG_FLAG: u16 = 0o100_000;
 const READ_USER: u16 = 0o000_400;
-const READ_GROUP: u16 = 0o000_200;
-const READ_OTHERS: u16 = 0o000_100;
-const WRITE_USER: u16 = 0o000_040;
+const READ_GROUP: u16 = 0o000_040;
+const READ_OTHERS: u16 = 0o000_004;
+const WRITE_USER: u16 = 0o000_200;
 const WRITE_GROUP: u16 = 0o000_020;
-const EXECUTE_USER: u16 = 0o000_002;
-const EXECUTE_GROUP: u16 = 0o000_004;
-const DEFAULT_RWX: u16 = READ_USER | READ_GROUP | READ_OTHERS | WRITE_USER | WRITE_GROUP | EXECUTE_USER | EXECUTE_GROUP;
+const WRITE_OTHERS: u16 = 0o000_002;
+const EXECUTE_USER: u16 = 0o000_100;
+const EXECUTE_GROUP: u16 = 0o000_010;
+const EXECUTE_OTHERS: u16 = 0o000_001;
+const NO_WRITE_PERMS: u16 = READ_USER | READ_GROUP | READ_OTHERS | EXECUTE_USER | EXECUTE_GROUP | EXECUTE_OTHERS;
+const DEFAULT_PERMS: u16 = NO_WRITE_PERMS | WRITE_USER;
 
 pub struct Inode<'a> {
     pub inode_no: InodeNo,
@@ -154,7 +157,7 @@ impl InodeInner {
         let now = u32::try_from(Utc::now().timestamp()).unwrap();
         LoHiMut::new(&mut self.i_uid, &mut self.l_i_uid_high).set(ROOT_USER_ID);
         LoHiMut::new(&mut self.i_gid, &mut self.l_i_gid_high).set(ROOT_GROUP_ID);
-        self.i_mode = DEFAULT_RWX | DIR_FLAG;
+        self.i_mode = DEFAULT_PERMS | DIR_FLAG;
         self.i_crtime = 0;
         self.i_atime = now;
         self.i_mtime = now;
@@ -170,7 +173,7 @@ impl InodeInner {
         let group_id = u32::from(getegid());
         LoHiMut::new(&mut self.i_uid, &mut self.l_i_uid_high).set(user_id);
         LoHiMut::new(&mut self.i_gid, &mut self.l_i_gid_high).set(group_id);
-        self.i_mode = DEFAULT_RWX | DIR_FLAG;
+        self.i_mode = DEFAULT_PERMS | DIR_FLAG;
         self.i_crtime = 0;
         self.i_atime = now;
         self.i_mtime = now;
