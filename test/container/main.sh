@@ -5,11 +5,11 @@ cd /project_root
 printf     "########################### BUILD ###########################\n\n"
 cargo test --no-run || exit 1
 cargo build 2>/dev/null || exit 1
-printf "\n\n######################## UNIT TESTS #########################\n\n"
+printf "\n\n######################## UNIT TESTS #########################\n"
 cargo test 2>/dev/null || TEST_FAILED=true
-printf "\n\n##################### UNIT TESTS (SUDO) #####################\n\n"
+printf "\n##################### UNIT TESTS (SUDO) #####################\n"
 cargo test-sudo 2>/dev/null || TEST_FAILED=true
-printf "\n\n##################### INTEGRATION TESTS #####################\n\n"
+printf "\n##################### INTEGRATION TESTS #####################\n\n"
 cd /test
 python3 run.py "$CARGO_TARGET_DIR/debug/ofs-convert-rs" tests || TEST_FAILED=true
 
