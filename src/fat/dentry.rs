@@ -13,6 +13,10 @@ pub union FatPseudoDentry {
 }
 
 impl FatPseudoDentry {
+    const LFN_FLAG: u8 = 0x0F;
+    const INVALID_FLAG: u8 = 0xE5;
+    const DIR_TABLE_END_FLAG: u8 = 0x00;
+
     pub fn as_dentry(&self) -> Option<&FatDentry> {
         // SAFETY: this is safe, since we only access the union if the check succeeds
         unsafe { self.is_dentry().then(|| &self.dentry) }
@@ -23,26 +27,26 @@ impl FatPseudoDentry {
         unsafe { self.is_long_file_name().then(|| &self.long_file_name) }
     }
 
-    pub fn is_dentry(&self) -> bool {
+    pub fn is_long_file_name(&self) -> bool {
         // SAFETY: attrs field is in the same position for both FatDentry and LongFileName,
         // so this is safe
-        unsafe { self.long_file_name.attrs & 0x0F == 0 }
+        unsafe { self.long_file_name.attrs == Self::LFN_FLAG }
     }
 
-    pub fn is_long_file_name(&self) -> bool {
-        !self.is_dentry()
+    pub fn is_dentry(&self) -> bool {
+        !self.is_long_file_name()
     }
 
     /// True iff self is invalid but the directory might contain more valid dentries
     pub fn is_invalid(&self) -> bool {
         // SAFETY: the first byte is used to mark invalid entries both for dentries and LFN entries, so this is safe
-        unsafe { self.long_file_name.sequence_no == 0xE5 }
+        unsafe { self.long_file_name.sequence_no == Self::INVALID_FLAG }
     }
 
     /// True iff self is invalid and the directory contains no more valid dentries
     pub fn is_dir_table_end(&self) -> bool {
         // SAFETY: we misuse `sequence_no` to check the first byte, regardless of whether it's a dentry or LFN entry
-        unsafe { self.long_file_name.sequence_no == 0x00 }
+        unsafe { self.long_file_name.sequence_no == Self::DIR_TABLE_END_FLAG }
     }
 
     pub fn should_be_ignored(&self) -> bool {
